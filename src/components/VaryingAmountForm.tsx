@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * Enter (or change) one month's amount for a recurring entry whose amount changes each month.
- * Shows the last three months for context, with "Same as Sep", "$0" and skip/clear shortcuts.
+ * Shows the last three due months for context, with "Same as Sep", "$0" and skip/clear shortcuts.
  */
 export function VaryingAmountForm({
   recurring,
@@ -41,7 +41,7 @@ export function VaryingAmountForm({
 
   const mon = (m: string) => MONTH_SHORT[parseMonthKey(m).month];
   const history = [3, 2, 1].map((k) => {
-    const m = addMonths(month, -k);
+    const m = addMonths(month, -k * recurring.every_months);
     return { month: m, amount: oneOffs.find((o) => o.recurring_id === recurring.id && o.month === m)?.amount };
   });
   const last = [...history].reverse().find((h) => h.amount !== undefined);

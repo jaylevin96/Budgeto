@@ -1,8 +1,9 @@
 import { supabase } from "@/lib/supabase";
-import { addMonths, currentMonthKey, type OneOff } from "@/lib/budget";
+import { addMonths, currentMonthKey, parseMonthKey, type OneOff } from "@/lib/budget";
 
 /**
- * A recurring manual entry: something that comes every month from `start_month` through
+ * A recurring manual entry: something that comes every month (or every `every_months` months,
+ * counted from `start_month`) from `start_month` through
  * `end_month` (or keeps going), except months in `skip_months`. Each month is a real manual
  * entry linked by `one_offs.recurring_id`.
  * - Same amount every month (rent, wages): months are filled in automatically when the app
@@ -24,6 +25,8 @@ export type RecurringEntry = {
   skip_months: string[];
   /** The amount changes every month, so each month's is entered by hand */
   amount_varies: boolean;
+  /** 1 = monthly, 3 = quarterly, 6 = twice a year, 12 = yearly; due months count from start_month */
+  every_months: number;
 };
 
 /** What an entry says: shared by a recurring entry and each of its months */
@@ -32,9 +35,52 @@ export type EntryFields = Pick<RecurringEntry, "name" | "amount" | "category_id"
 /** Which months an edit or delete applies to, counted from the month being edited */
 export type Scope = "this" | "future" | "all";
 
-const COLUMNS = "id, name, amount, category_id, line_item_id, note, start_month, end_month, skip_months, amount_varies";
+const COLUMNS = "id, name, amount, category_id, line_item_id, note, start_month, end_month, skip_months, amount_varies, every_months";
 
-const toEntry = (r: RecurringEntry): RecurringEntry => ({ ...r, amount: Number(r.amount), skip_months: r.skip_months ?? [] });
+const toEntry = (r: RecurringEntry): RecurringEntry => ({
+  ...r,
+  amount: Number(r.amount),
+  skip_months: r.skip_months ?? [],
+  every_months: r.every_months || 1,
+});
+
+/** Cadences offered when adding or changing a recurring entry */
+export const CADENCES = [1, 3, 6, 12] as const;
+
+/** "every month", "every 3 months", "every year" */
+export function cadenceLabel(everyMonths: number): string {
+  return everyMonths === 1 ? "every month" : everyMonths === 12 ? "every year" : `every ${everyMonths} months`;
+}
+
+function monthsBetween(from: string, to: string): number {
+  const a = parseMonthKey(from);
+  const b = parseMonthKey(to);
+  return (b.year - a.year) * 12 + (b.month - a.month);
+}
+
+/** Whether `month` is one of the entry's due months by cadence (ignores range and skips) */
+export function onSchedule(r: Pick<RecurringEntry, "start_month" | "every_months">, month: string): boolean {
+  const n = monthsBetween(r.start_month, month);
+  return n >= 0 && n % r.every_months === 0;
+}
+
+/** The entry's due month before `month` (by cadence; may be before it started) */
+export function previousDue(r: RecurringEntry, month: string): string {
+  return addMonths(month, -r.every_months);
+}
+
+/** The first due month after `after` that isn't skipped, or null when it has ended by then */
+export function nextDue(r: RecurringEntry, after: string): string | null {
+  let m = r.start_month;
+  if (m <= after) {
+    const steps = Math.floor(monthsBetween(r.start_month, after) / r.every_months) + 1;
+    m = addMonths(r.start_month, steps * r.every_months);
+  }
+  for (; r.end_month === null || m <= r.end_month; m = addMonths(m, r.every_months)) {
+    if (!r.skip_months.includes(m)) return m;
+  }
+  return null;
+}
 const clean = (f: EntryFields): EntryFields => ({ ...f, name: f.name.trim(), note: f.note?.trim() || null });
 
 export async function fetchRecurring(): Promise<RecurringEntry[]> {
@@ -43,16 +89,21 @@ export async function fetchRecurring(): Promise<RecurringEntry[]> {
   return (data as RecurringEntry[]).map(toEntry);
 }
 
-/** Whether a recurring entry covers `month` (in range and not skipped) */
+/** Whether a recurring entry covers `month` (in range, due by its cadence and not skipped) */
 export function activeIn(r: RecurringEntry, month: string): boolean {
-  return r.start_month <= month && (r.end_month === null || month <= r.end_month) && !r.skip_months.includes(month);
+  return (
+    r.start_month <= month &&
+    (r.end_month === null || month <= r.end_month) &&
+    onSchedule(r, month) &&
+    !r.skip_months.includes(month)
+  );
 }
 
 /** Months up to `through` that should have an occurrence but don't yet */
 export function dueMonths(r: RecurringEntry, existing: Set<string>, through: string): string[] {
   const last = r.end_month !== null && r.end_month < through ? r.end_month : through;
   const out: string[] = [];
-  for (let m = r.start_month; m <= last; m = addMonths(m, 1)) {
+  for (let m = r.start_month; m <= last; m = addMonths(m, r.every_months)) {
     if (!existing.has(m) && !r.skip_months.includes(m)) out.push(m);
   }
   return out;
@@ -90,10 +141,15 @@ export function fieldsOf(x: EntryFields): EntryFields {
  * Start a recurring entry. Its first month gets the amount given; later months up to now are
  * filled in (same amount) or left to enter (amount varies).
  */
-export async function createRecurring(fields: EntryFields, startMonth: string, amountVaries = false): Promise<RecurringEntry> {
+export async function createRecurring(
+  fields: EntryFields,
+  startMonth: string,
+  amountVaries = false,
+  everyMonths = 1
+): Promise<RecurringEntry> {
   const { data, error } = await supabase
     .from("recurring_entries")
-    .insert({ ...clean(fields), start_month: startMonth, amount_varies: amountVaries })
+    .insert({ ...clean(fields), start_month: startMonth, amount_varies: amountVaries, every_months: everyMonths })
     .select(COLUMNS)
     .single();
   if (error) throw error;
@@ -130,10 +186,16 @@ export function monthsNeedingAmount(r: RecurringEntry, existing: Set<string>, th
 }
 
 /** Turn an existing manual entry into the first month (`month`) of a new recurring entry. */
-export async function makeRecurring(oneOff: OneOff, fields: EntryFields, month: string, amountVaries = false): Promise<RecurringEntry> {
+export async function makeRecurring(
+  oneOff: OneOff,
+  fields: EntryFields,
+  month: string,
+  amountVaries = false,
+  everyMonths = 1
+): Promise<RecurringEntry> {
   const { data, error } = await supabase
     .from("recurring_entries")
-    .insert({ ...clean(fields), start_month: month, amount_varies: amountVaries })
+    .insert({ ...clean(fields), start_month: month, amount_varies: amountVaries, every_months: everyMonths })
     .select(COLUMNS)
     .single();
   if (error) throw error;
@@ -213,15 +275,33 @@ export async function stopRecurring(entry: RecurringEntry, lastMonth: string): P
 
 /** Bring back a stopped recurring entry from `fromMonth` (a new one, so the gap stays empty). */
 export async function restartRecurring(entry: RecurringEntry, fromMonth: string): Promise<RecurringEntry> {
-  if (!entry.amount_varies) return createRecurring(fieldsOf(entry), fromMonth);
+  if (!entry.amount_varies) return createRecurring(fieldsOf(entry), fromMonth, false, entry.every_months);
   // Amount varies: start it without making up an amount for the first month
   const { data, error } = await supabase
     .from("recurring_entries")
-    .insert({ ...clean(fieldsOf(entry)), start_month: fromMonth, amount_varies: true })
+    .insert({ ...clean(fieldsOf(entry)), start_month: fromMonth, amount_varies: true, every_months: entry.every_months })
     .select(COLUMNS)
     .single();
   if (error) throw error;
   return toEntry(data as RecurringEntry);
+}
+
+/**
+ * Change how often an entry comes. Due months are counted from its start, so months that are
+ * no longer due are removed and newly due ones (same amount) are filled in.
+ */
+export async function setCadence(entry: RecurringEntry, everyMonths: number): Promise<void> {
+  const { error } = await supabase.from("recurring_entries").update({ every_months: everyMonths }).eq("id", entry.id);
+  if (error) throw error;
+  const next = { ...entry, every_months: everyMonths };
+  const { data, error: err } = await supabase.from("one_offs").select("id, month").eq("recurring_id", entry.id);
+  if (err) throw err;
+  const offSchedule = (data as { id: string; month: string }[]).filter((o) => !onSchedule(next, o.month)).map((o) => o.id);
+  if (offSchedule.length) {
+    const { error: e2 } = await supabase.from("one_offs").delete().in("id", offSchedule);
+    if (e2) throw e2;
+  }
+  await ensureOccurrences([next]);
 }
 
 /** Undo "skip this month": the month is filled in again. */

@@ -22,10 +22,16 @@ import {
 } from "@/lib/budget";
 import {
   activeIn,
+  CADENCES,
+  cadenceLabel,
   needingAmount,
+  nextDue,
+  onSchedule,
+  previousDue,
   removeRecurring,
   restartRecurring,
   setAmountVaries,
+  setCadence,
   stopRecurring,
   unskipRecurring,
   updateRecurring,
@@ -67,7 +73,10 @@ export function RecurringPanel({
 
   const prevMonth = addMonths(month, -1);
   const isFuture = month > currentMonthKey();
-  const active = recurring.filter((r) => r.start_month <= month && (r.end_month === null || month <= r.end_month));
+  const inRange = recurring.filter((r) => r.start_month <= month && (r.end_month === null || month <= r.end_month));
+  const active = inRange.filter((r) => onSchedule(r, month));
+  /** Running, but not due this month (e.g. insurance every 6 months) */
+  const notDue = inRange.filter((r) => !onSchedule(r, month));
   const stopped = recurring.filter((r) => r.end_month !== null && r.end_month < month);
   const endedLastMonth = stopped.filter((r) => r.end_month === prevMonth);
   const upcoming = recurring.filter((r) => r.start_month > month);
@@ -76,8 +85,8 @@ export function RecurringPanel({
     [catById.get(r.category_id)?.name, items.find((i) => i.id === r.line_item_id)?.name].filter(Boolean).join(" › ");
   const occurrence = (r: RecurringEntry, m: string) => oneOffs.find((o) => o.recurring_id === r.id && o.month === m);
 
-  /** Last known amount for a varying entry: last month's, else the template's */
-  const hintFor = (r: RecurringEntry) => occurrence(r, prevMonth)?.amount ?? r.amount;
+  /** Last known amount for a varying entry: the previous due month's, else the template's */
+  const hintFor = (r: RecurringEntry) => occurrence(r, previousDue(r, month))?.amount ?? r.amount;
   // Varying entries with no amount yet for this month (entered in the card at the top of the page)
   const needsAmount = needingAmount(recurring, oneOffs, month);
 
@@ -91,16 +100,19 @@ export function RecurringPanel({
     // A future month's varying amount isn't known unless it was entered ahead of time
     const estimate = isFuture && r.amount_varies && !skipped && !occ;
     const amount = skipped || estimate || pending ? 0 : (occ?.amount ?? (isFuture ? r.amount : 0));
-    const prev = occurrence(r, prevMonth)?.amount;
+    // Compare with the previous due month: last month, or e.g. 6 months back for insurance
+    const prevDue = previousDue(r, month);
+    const prev = occurrence(r, prevDue)?.amount;
     const notes: string[] = [];
+    if (r.every_months > 1) notes.push(cadenceLabel(r.every_months));
     if (estimate || pending) notes.push(`last ${formatMoney(hintFor(r), true)}`);
     else if (skipped) notes.push(`skipped in ${formatMonth(month, "short")}`);
     else if (r.start_month === month) notes.push("new this month");
-    else if (prev === undefined && r.start_month <= prevMonth)
-      notes.push(r.amount_varies ? `nothing entered for ${formatMonth(prevMonth, "short")}` : `skipped in ${formatMonth(prevMonth, "short")}`);
+    else if (prev === undefined && r.start_month <= prevDue)
+      notes.push(r.amount_varies ? `nothing entered for ${formatMonth(prevDue, "short")}` : `skipped in ${formatMonth(prevDue, "short")}`);
     else if (prev !== undefined && prev !== amount) {
       const d = amount - prev;
-      notes.push(`${d > 0 ? "up" : "down"} ${formatMoney(Math.abs(d), true)} from ${formatMoney(prev, true)} in ${formatMonth(prevMonth, "short")}`);
+      notes.push(`${d > 0 ? "up" : "down"} ${formatMoney(Math.abs(d), true)} from ${formatMoney(prev, true)} in ${formatMonth(prevDue, "short")}`);
     }
     if (occ && occ.amount !== r.amount && !skipped && !r.amount_varies) notes.push(`usually ${formatMoney(r.amount, true)}`);
     if (r.end_month === month) notes.push(`last month: stops after ${formatMonth(month, "short")}`);
@@ -201,7 +213,7 @@ export function RecurringPanel({
           </dl>
         )}
       </div>
-      {lines.length === 0 && upcoming.length === 0 && (
+      {lines.length === 0 && upcoming.length === 0 && notDue.length === 0 && (
         <p className="px-4 py-3 text-sm text-[var(--color-muted-foreground)]">
           Nothing recurring yet. Add rent, wages or subscriptions once and they're filled in every month.
         </p>
@@ -240,6 +252,21 @@ export function RecurringPanel({
           </p>
           <ul className="divide-y divide-[var(--color-border)]">
             {endedLastMonth.map((r) => row(r, 0, [`stopped after ${formatMonth(prevMonth, "short")}`], true))}
+          </ul>
+        </div>
+      )}
+      {notDue.length > 0 && (
+        <div className="border-t border-[var(--color-border)]">
+          <p className="px-4 pt-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">
+            Not due in {formatMonth(month, "short")}
+          </p>
+          <ul className="divide-y divide-[var(--color-border)]">
+            {notDue.map((r) => {
+              const next = nextDue(r, month);
+              return row(r, r.amount, [cadenceLabel(r.every_months), next ? `next ${formatMonth(next, "short")}` : "no more due"], false, (
+                <Badge tone="muted">{r.amount_varies ? "Amount varies" : formatMoney(r.amount, true)}</Badge>
+              ));
+            })}
           </ul>
         </div>
       )}
@@ -346,6 +373,7 @@ export function RecurringDialog({
   const [note, setNote] = useState(entry.note ?? "");
   const [scope, setScope] = useState<"future" | "all">("future");
   const [varies, setVaries] = useState(entry.amount_varies);
+  const [everyMonths, setEveryMonths] = useState(entry.every_months);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -355,6 +383,8 @@ export function RecurringDialog({
   const prevLabel = formatMonth(addMonths(from, -1), "short");
   const isCurrentOrPast = from <= currentMonthKey();
   const skipped = entry.skip_months.includes(month);
+  const dueThisMonth = onSchedule(entry, month);
+  const next = nextDue(entry, month);
   const categoryItems = items.filter((i) => i.category_id === categoryId && (!i.archived || i.id === lineItemId));
   // A varying amount for a month this entry covers: the modal is about entering it
   const entersAmount = entry.amount_varies && activeIn(entry, month);
@@ -377,6 +407,14 @@ export function RecurringDialog({
     // A varying entry has no single amount; each month's is entered on its own
     const amount = varies ? entry.amount : parseAmount(amountText);
     if (amount === null || Number.isNaN(amount)) return setError("Enter an amount like 2000 or 15.99 (0 is fine)");
+    if (
+      everyMonths !== entry.every_months &&
+      !window.confirm(
+        `Change "${entry.name}" to ${cadenceLabel(everyMonths)}, counted from ${formatMonth(entry.start_month, "short")}? ` +
+          "Months that are no longer due lose their entries; newly due months are added."
+      )
+    )
+      return;
     run(async () => {
       await updateRecurring(
         { ...entry, amount_varies: varies },
@@ -385,6 +423,7 @@ export function RecurringDialog({
         from
       );
       if (varies !== entry.amount_varies) await setAmountVaries(entry, varies);
+      if (everyMonths !== entry.every_months) await setCadence({ ...entry, amount_varies: varies }, everyMonths);
     });
   }
 
@@ -397,9 +436,12 @@ export function RecurringDialog({
             {entersAmount && <span className="font-normal text-[var(--color-muted-foreground)]">· {formatMonth(month)}</span>}
           </DialogTitle>
           <DialogDescription>
-            Recurring every month since {formatMonth(entry.start_month, "short")}
+            Recurring {cadenceLabel(entry.every_months)} since {formatMonth(entry.start_month, "short")}
             {entry.end_month ? ` until ${formatMonth(entry.end_month, "short")}` : ", until you stop it"}
-            {entry.amount_varies ? "; the amount changes each month." : `, ${formatMoney(entry.amount, true)} each month.`}
+            {entry.amount_varies
+              ? "; the amount changes each time."
+              : `, ${formatMoney(entry.amount, true)} ${entry.every_months === 1 ? "each month" : "each time"}.`}
+            {entry.every_months > 1 && (dueThisMonth ? ` Due in ${formatMonth(month, "short")}.` : next ? ` Next due ${formatMonth(next, "short")}.` : "")}
           </DialogDescription>
         </DialogHeader>
         {entersAmount && (
@@ -428,7 +470,7 @@ export function RecurringDialog({
             </div>
             {!varies && (
               <div className="space-y-2">
-                <Label htmlFor="re-amount">Amount each month</Label>
+                <Label htmlFor="re-amount">{everyMonths === 1 ? "Amount each month" : "Amount each time"}</Label>
                 <Input id="re-amount" inputMode="decimal" value={amountText} onChange={(e) => setAmountText(e.target.value)} />
               </div>
             )}
@@ -469,15 +511,26 @@ export function RecurringDialog({
             <Label htmlFor="re-note">Note (optional)</Label>
             <Input id="re-note" value={note} onChange={(e) => setNote(e.target.value)} />
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="re-cadence">How often</Label>
+            <Select id="re-cadence" value={everyMonths} onChange={(e) => setEveryMonths(Number(e.target.value))}>
+              {CADENCES.map((n) => (
+                <option key={n} value={n}>
+                  {cadenceLabel(n).replace(/^every/, "Every")}
+                  {n > 1 && ` (from ${formatMonth(entry.start_month, "short")})`}
+                </option>
+              ))}
+            </Select>
+          </div>
           <fieldset className="space-y-1.5 rounded-md border border-[var(--color-border)] p-3 text-sm">
             <legend className="px-1 font-medium">Amount</legend>
             <label className="flex items-center gap-2">
               <input type="radio" name="re-varies" className="h-4 w-4" checked={!varies} onChange={() => setVaries(false)} />
-              Same every month (filled in automatically)
+              Same each time (filled in automatically)
             </label>
             <label className="flex items-center gap-2">
               <input type="radio" name="re-varies" className="h-4 w-4" checked={varies} onChange={() => setVaries(true)} />
-              Changes each month (asks for it each month)
+              Changes each time (asks for it each due month)
             </label>
           </fieldset>
           <fieldset className="space-y-1.5 rounded-md border border-[var(--color-border)] p-3 text-sm">
@@ -510,7 +563,7 @@ export function RecurringDialog({
         <div className="space-y-2 border-t border-[var(--color-border)] pt-4">
           <p className="text-xs font-medium text-[var(--color-muted-foreground)]">Stop or skip</p>
           <div className="flex flex-wrap gap-2">
-            {isCurrentOrPast && !skipped && month >= entry.start_month && (
+            {isCurrentOrPast && !skipped && dueThisMonth && month >= entry.start_month && (
               <Button variant="outline" size="sm" disabled={busy} onClick={() => run(() => removeRecurring(entry, "this", month))}>
                 Skip {formatMonth(month, "short")} only
               </Button>

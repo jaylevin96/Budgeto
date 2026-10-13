@@ -20,6 +20,8 @@ import {
   type OneOff,
 } from "@/lib/budget";
 import {
+  CADENCES,
+  cadenceLabel,
   createRecurring,
   makeRecurring,
   removeRecurring,
@@ -71,6 +73,7 @@ export function OneOffDialog({
   const [note, setNote] = useState(oneOff?.note ?? "");
   const [repeat, setRepeat] = useState(startRecurring);
   const [varies, setVaries] = useState(false);
+  const [everyMonths, setEveryMonths] = useState(1);
   const [scope, setScope] = useState<Scope>("this");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -120,8 +123,8 @@ export function OneOffDialog({
     }
     if (repeat) {
       return run(async () => {
-        if (oneOff) await makeRecurring(oneOff, fields, month, varies);
-        else await createRecurring(fields, month, varies);
+        if (oneOff) await makeRecurring(oneOff, fields, month, varies, everyMonths);
+        else await createRecurring(fields, month, varies, everyMonths);
         onRecurringChanged();
       });
     }
@@ -158,7 +161,7 @@ export function OneOffDialog({
           </DialogTitle>
           <DialogDescription>
             {series
-              ? `Repeats every month since ${formatMonth(series.start_month, "short")}${
+              ? `Repeats ${cadenceLabel(series.every_months)} since ${formatMonth(series.start_month, "short")}${
                   series.end_month ? ` until ${formatMonth(series.end_month, "short")}` : ""
                 } at ${formatMoney(series.amount, true)}. Choose below which months your change applies to.`
               : "A named amount for one month, like “Rent $2,000” or “Hotel $500”. It counts toward its category; pick a line item to roll it into that line."}
@@ -315,28 +318,46 @@ export function OneOffDialog({
                   <input type="checkbox" className="mt-0.5 h-4 w-4" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} />
                   <span>
                     <span className="flex items-center gap-1.5 font-medium">
-                      <Repeat className="h-3.5 w-3.5" aria-hidden /> Repeat every month from {formatMonth(month, "short")}
+                      <Repeat className="h-3.5 w-3.5" aria-hidden /> Repeat {repeat ? cadenceLabel(everyMonths) : "every month"} from{" "}
+                      {formatMonth(month, "short")}
                     </span>
                     <span className="block text-xs text-[var(--color-muted-foreground)]">
-                      Rent, wages, utilities, subscriptions. Manage it under Recurring on the Month page.
+                      Rent, wages, utilities, subscriptions, insurance. Manage it under Recurring on the Month page.
                     </span>
                   </span>
                 </label>
                 {repeat && (
                   <div className="space-y-1.5 pl-6">
+                    <div className="flex items-center gap-2 pb-1">
+                      <Label htmlFor="oo-cadence" className="font-normal">
+                        How often
+                      </Label>
+                      <Select
+                        id="oo-cadence"
+                        className="h-8 w-auto"
+                        value={everyMonths}
+                        onChange={(e) => setEveryMonths(Number(e.target.value))}
+                      >
+                        {CADENCES.map((n) => (
+                          <option key={n} value={n}>
+                            {cadenceLabel(n).replace(/^every/, "Every")}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
                     <label className="flex items-start gap-2">
                       <input type="radio" name="oo-varies" className="mt-0.5 h-4 w-4" checked={!varies} onChange={() => setVaries(false)} />
                       <span>
-                        Same amount every month
+                        Same amount each time
                         <span className="block text-xs text-[var(--color-muted-foreground)]">Filled in automatically (rent, wages).</span>
                       </span>
                     </label>
                     <label className="flex items-start gap-2">
                       <input type="radio" name="oo-varies" className="mt-0.5 h-4 w-4" checked={varies} onChange={() => setVaries(true)} />
                       <span>
-                        Amount changes each month
+                        Amount changes each time
                         <span className="block text-xs text-[var(--color-muted-foreground)]">
-                          Each month asks you for the amount, with last month's as a hint (utilities, childcare).
+                          Each due month asks you for the amount, with the last one as a hint (utilities, childcare).
                         </span>
                       </span>
                     </label>
