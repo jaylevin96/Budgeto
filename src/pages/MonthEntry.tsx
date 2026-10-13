@@ -64,6 +64,7 @@ export function MonthEntry() {
     applyAmounts,
     applyOneOff,
     applyTransactions,
+    applyCreated,
   } = useBudget(addMonths(month, -12), addMonths(month, 1));
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [filling, setFilling] = useState(false);
@@ -341,6 +342,7 @@ export function MonthEntry() {
           items={items}
           oneOffs={oneOffs}
           onSaved={applyTransactions}
+          onCreated={applyCreated}
         />
       )}
 

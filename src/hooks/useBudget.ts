@@ -5,6 +5,7 @@ import {
   fetchOneOffs,
   fetchStructure,
   type Category,
+  type CreatedStructure,
   type LineItem,
   type MonthlyAmount,
   type OneOff,
@@ -81,6 +82,15 @@ export function useBudget(fromKey: string, toKeyExclusive: string) {
     });
   }, []);
 
+  /** Add a line item (and its new category) created elsewhere, e.g. while filing a card charge. */
+  const applyCreated = useCallback(({ category, item }: CreatedStructure) => {
+    setState((s) => ({
+      ...s,
+      categories: category ? [...s.categories, category] : s.categories,
+      items: [...s.items, item],
+    }));
+  }, []);
+
   const applyTransactions = useCallback((saved: Transaction[]) => {
     setState((s) => {
       const byId = new Map(saved.map((t) => [t.id, t]));
@@ -93,5 +103,5 @@ export function useBudget(fromKey: string, toKeyExclusive: string) {
     [state.categories, state.items, state.amounts, state.oneOffs, state.transactions]
   );
 
-  return { ...state, ledger, reload: load, applyAmount, applyAmounts, applyOneOff, applyTransactions };
+  return { ...state, ledger, reload: load, applyAmount, applyAmounts, applyOneOff, applyTransactions, applyCreated };
 }

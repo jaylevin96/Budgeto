@@ -158,6 +158,50 @@ export async function fetchStructure(): Promise<{ categories: Category[]; items:
   };
 }
 
+export type CreatedStructure = { category: Category | null; item: LineItem };
+
+/**
+ * Create a spending line item, in an existing category or a new one (placed last).
+ * Used when filing a card charge somewhere that doesn't exist yet.
+ */
+export async function createLineItem(
+  name: string,
+  target: { categoryId: string } | { newCategoryName: string },
+  existing: { categories: Category[]; items: LineItem[] }
+): Promise<CreatedStructure> {
+  const nextOrder = (list: { sort_order: number }[]) => Math.max(0, ...list.map((r) => r.sort_order)) + 10;
+  let category: Category | null = null;
+  let categoryId: string;
+  if ("categoryId" in target) {
+    categoryId = target.categoryId;
+  } else {
+    const { data, error } = await supabase
+      .from("categories")
+      .insert({ name: target.newCategoryName.trim(), kind: "expense", sort_order: nextOrder(existing.categories) })
+      .select("id, name, kind, sort_order, archived, monthly_budget")
+      .single();
+    if (error) throw error.code === "23505" ? new Error("A category with that name already exists") : error;
+    category = { ...(data as Category), monthly_budget: num(data.monthly_budget) };
+    categoryId = category.id;
+  }
+  const { data, error } = await supabase
+    .from("line_items")
+    .insert({
+      name: name.trim(),
+      category_id: categoryId,
+      sort_order: nextOrder(existing.items.filter((i) => i.category_id === categoryId)),
+    })
+    .select("id, category_id, name, recurrence, default_amount, sort_order, archived, monthly_budget")
+    .single();
+  if (error) {
+    // Don't leave an empty new category behind
+    if (category) await supabase.from("categories").delete().eq("id", category.id);
+    throw error.code === "23505" ? new Error("That category already has a line item with this name") : error;
+  }
+  const item = data as LineItem;
+  return { category, item: { ...item, default_amount: num(item.default_amount), monthly_budget: num(item.monthly_budget) } };
+}
+
 const AMOUNT_COLUMNS = "id, line_item_id, month, amount, note";
 const ONE_OFF_COLUMNS = "id, name, amount, month, category_id, line_item_id, note";
 

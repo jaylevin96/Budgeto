@@ -405,6 +405,15 @@ export function CardImport() {
                           categories={loaded.categories}
                           items={loaded.items}
                           oneOffs={loaded.oneOffs.filter((o) => o.month === r.row.month)}
+                          onCreated={({ category, item }) =>
+                            setLoaded((l) =>
+                              l && {
+                                ...l,
+                                categories: category ? [...l.categories, category] : l.categories,
+                                items: [...l.items, item],
+                              }
+                            )
+                          }
                           className="w-full sm:w-56"
                           aria-label={`Where ${r.row.merchant} on ${formatDay(r.row.postedOn)} goes`}
                         />

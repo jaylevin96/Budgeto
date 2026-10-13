@@ -37,6 +37,7 @@ import {
   uncategorizedCard,
   uncategorizedTotal,
   type Category,
+  type CreatedStructure,
   type Ledger,
   type LineItem,
   type MonthlyAmount,
@@ -74,7 +75,7 @@ export function YearGrid() {
   const year = /^\d{4}$/.test(params.year ?? "") ? Number(params.year) : parseMonthKey(currentMonthKey()).year;
   const months = Array.from({ length: 12 }, (_, m) => monthKey(year, m));
 
-  const { categories, items, oneOffs, ledger, loading, error, reload, applyAmount, applyOneOff, applyTransactions } = useBudget(
+  const { categories, items, oneOffs, ledger, loading, error, reload, applyAmount, applyOneOff, applyTransactions, applyCreated } = useBudget(
     monthKey(year, 0),
     monthKey(year + 1, 0)
   );
@@ -360,6 +361,7 @@ export function YearGrid() {
           onEditOneOff={(o) => setEditingOneOff({ oneOff: o, month: o.month })}
           onAddOneOff={(defaults) => setEditingOneOff({ oneOff: null, ...defaults })}
           onTransactionsSaved={applyTransactions}
+          onCreated={applyCreated}
         />
       )}
       {editingOneOff && (
@@ -599,6 +601,7 @@ function CellDialog({
   onEditOneOff,
   onAddOneOff,
   onTransactionsSaved,
+  onCreated,
 }: {
   target: CellTarget;
   ledger: Ledger;
@@ -607,6 +610,7 @@ function CellDialog({
   onEditOneOff: (o: OneOff) => void;
   onAddOneOff: (defaults: { month: string; category_id?: string | null; line_item_id?: string | null }) => void;
   onTransactionsSaved: (saved: Transaction[]) => void;
+  onCreated: (created: CreatedStructure) => void;
 }) {
   const { month } = target;
   // Snapshot of which card charges to show, so a reassigned charge stays in view
@@ -665,6 +669,7 @@ function CellDialog({
               items={ledger.items}
               oneOffs={ledger.oneOffs}
               onSaved={onTransactionsSaved}
+              onCreated={onCreated}
             />
           </div>
         )}
