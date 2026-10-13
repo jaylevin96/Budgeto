@@ -2,6 +2,14 @@
 
 A household budget tracker that replaces `2026_Budget.xlsx`: quick, accurate data entry plus month, year-to-date and year-over-year views of income and spending.
 
+> **Decisions (Oct 2026), these override the sections below:**
+> - **One shared login.** No household or member tables; rows are scoped to `auth.uid()` like Tracko.
+> - **`budgeto` schema** (Option A in §3).
+> - **Monthly totals, not individual transactions.** The model is `categories → line_items → monthly_amounts` (one amount per item per month), not the `transactions` ledger in §4. Quick Add (§5.2) and the transactions list (§5.3) are dropped. The Month page is the entry screen.
+> - **401k and HSA** are a `savings` category kind: tracked and charted, but not counted as spending. "Left over" = income − spending − savings, which is the same as the spreadsheet's Net Income.
+>
+> Phase 1 is built: see the README for setup.
+
 ---
 
 ## 1. What the spreadsheet does today
