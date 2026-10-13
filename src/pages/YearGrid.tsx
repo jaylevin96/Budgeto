@@ -1,13 +1,10 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, ChevronDown, ChevronRight, Download, MessageSquare, Plus } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Download, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FormError } from "@/components/ui/form-message";
-import { Label } from "@/components/ui/label";
-import { AmountInput } from "@/components/AmountInput";
-import { useCellSaver } from "@/hooks/useCellSaver";
 import { EmptyBudget } from "@/components/EmptyBudget";
 import { CardTransactionList } from "@/components/CardTransactions";
 import { OneOffDialog } from "@/components/OneOffDialog";
@@ -33,7 +30,6 @@ import {
   monthSlug,
   MONTH_SHORT,
   parseMonthKey,
-  saveNote,
   summarizeMonth,
   sumMoney,
   totalForCategoryMonth,
@@ -43,7 +39,6 @@ import {
   type CreatedStructure,
   type Ledger,
   type LineItem,
-  type MonthlyAmount,
   type OneOff,
 } from "@/lib/budget";
 import type { Transaction } from "@/lib/transactions";
@@ -70,7 +65,7 @@ type CellTarget =
 
 type EditingOneOff = { oneOff: OneOff | null; month: string; category_id?: string | null; line_item_id?: string | null };
 
-/** The spreadsheet view: categories collapse to totals, expand to editable line items and entries. */
+/** The spreadsheet view: categories collapse to totals, expand to line items and their "Other" row. */
 export function YearGrid() {
   const params = useParams();
   const navigate = useNavigate();
@@ -78,7 +73,7 @@ export function YearGrid() {
   const year = /^\d{4}$/.test(params.year ?? "") ? Number(params.year) : parseMonthKey(currentMonthKey()).year;
   const months = Array.from({ length: 12 }, (_, m) => monthKey(year, m));
 
-  const { categories, items, oneOffs, ledger, loading, error, reload, applyAmount, applyOneOff, applyTransactions, applyCreated } = useBudget(
+  const { categories, items, oneOffs, ledger, loading, error, reload, applyOneOff, applyTransactions, applyCreated } = useBudget(
     monthKey(year, 0),
     monthKey(year + 1, 0)
   );
@@ -103,20 +98,6 @@ export function YearGrid() {
       else next.add(id);
       return next;
     });
-
-  // Enter moves down the same month column, like a spreadsheet; Tab moves right natively
-  const tableRef = useRef<HTMLTableElement>(null);
-  const focusBelow = useCallback((from: HTMLInputElement) => {
-    const col = from.dataset.col;
-    const inputs = Array.from(tableRef.current?.querySelectorAll<HTMLInputElement>(`input[data-col="${col}"]`) ?? []);
-    const next = inputs[inputs.indexOf(from) + 1];
-    if (next) {
-      next.focus();
-      next.select();
-    } else {
-      from.blur();
-    }
-  }, []);
 
   async function handleExport() {
     setExporting(true);
@@ -164,13 +145,6 @@ export function YearGrid() {
           <Button variant="ghost" size="sm" onClick={() => setExpanded(new Set())}>
             Collapse all
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setEditingOneOff({ oneOff: null, month: lastMonthWithData(summaries) ?? months[0] })}
-          >
-            <Plus /> Manual entry
-          </Button>
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || loading}>
             <Download /> {exporting ? "Exporting…" : "Export .xlsx"}
           </Button>
@@ -178,15 +152,14 @@ export function YearGrid() {
       </div>
       {(error || exportError) && <FormError>{error ?? exportError}</FormError>}
       <p className="text-xs text-[var(--color-muted-foreground)]">
-        Click a category to see its line items. Line-item cells are editable: Enter moves down, Tab moves right.
-        Cells marked <span className="rounded bg-[var(--color-muted)] px-1">+1</span> include manual entries or card charges; click
-        them to see details.
+        Totals come from manual entries and card charges. Click a category to see its line items, then click any month to
+        see what makes it up or add a manual entry.
       </p>
       {loading ? (
         <p className="text-[var(--color-muted-foreground)]">Loading…</p>
       ) : (
         <Card className="overflow-x-auto">
-          <table ref={tableRef} className="w-full border-collapse text-sm">
+          <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border)] text-xs text-[var(--color-muted-foreground)]">
                 <th className={cn(stickyName, "bg-[var(--color-card)] font-medium")}>Category / item</th>
@@ -209,7 +182,7 @@ export function YearGrid() {
                 const catItems = items.filter((i) => i.category_id === cat.id);
                 const totals = months.map((m) => totalForCategoryMonth(ledger, cat.id, m));
                 const has = months.map((m) => categoryHasData(ledger, cat.id, m));
-                // The category's own "Entries" row: category-only entries plus card charges filed to it
+                // The category's "Other" row: manual entries and card charges with no line item
                 const entryTotals = months.map((m) => categoryEntriesTotal(ledger, cat.id, m));
                 const hasEntries = months.map((m) => categoryHasEntries(ledger, cat.id, m));
                 return (
@@ -243,14 +216,12 @@ export function YearGrid() {
                           months={months}
                           ledger={ledger}
                           color={colors.categorical[0]}
-                          onSaved={(month, saved) => applyAmount(item.id, month, saved)}
-                          onEnter={focusBelow}
                           onOpenCell={(month) => setCell({ kind: "item", item, month })}
                         />
                       ))}
                     {isOpen && hasEntries.some(Boolean) && (
                       <SummaryRow
-                        label={<span className="pl-5 italic">Manual entries</span>}
+                        label={<span className="pl-5 italic">Other</span>}
                         values={entryTotals}
                         has={hasEntries}
                         color={colors.categorical[0]}
@@ -361,7 +332,6 @@ export function YearGrid() {
           target={cell}
           ledger={ledger}
           onClose={() => setCell(null)}
-          onSaved={(itemId, month, saved) => applyAmount(itemId, month, saved)}
           onEditOneOff={(o) => setEditingOneOff({ oneOff: o, month: o.month })}
           onAddOneOff={(defaults) => setEditingOneOff({ oneOff: null, ...defaults })}
           onTransactionsSaved={applyTransactions}
@@ -385,11 +355,7 @@ export function YearGrid() {
   );
 }
 
-function lastMonthWithData(summaries: { month: string; hasData: boolean }[]): string | null {
-  return [...summaries].reverse().find((s) => s.hasData)?.month ?? null;
-}
-
-/** Read-only row of month totals (category totals, one-off sums, grand totals). */
+/** Read-only row of month totals (category totals, "Other" rows, grand totals). */
 function SummaryRow({
   label,
   values,
@@ -461,22 +427,18 @@ function SummaryRow({
   );
 }
 
-/** Editable line-item row. Cells with linked one-offs or notes open the cell dialog. */
+/** Line-item row; each month opens the cell dialog (manual entries and card charges). */
 function ItemRow({
   item,
   months,
   ledger,
   color,
-  onSaved,
-  onEnter,
   onOpenCell,
 }: {
   item: LineItem;
   months: string[];
   ledger: Ledger;
   color: string;
-  onSaved: (month: string, saved: MonthlyAmount | null) => void;
-  onEnter: (input: HTMLInputElement) => void;
   onOpenCell: (month: string) => void;
 }) {
   const totals = months.map((m) => itemMonthTotal(ledger, item.id, m));
@@ -486,18 +448,9 @@ function ItemRow({
       <td className={cn(stickyName, "bg-[var(--color-card)] pl-8", item.archived && "text-[var(--color-muted-foreground)]")}>
         {item.name}
       </td>
-      {months.map((m, i) => (
+      {months.map((m) => (
         <td key={m} className="px-0.5 py-0.5 text-right">
-          <ItemCell
-            item={item}
-            month={m}
-            col={i}
-            ledger={ledger}
-            budget={item.monthly_budget}
-            onSaved={(saved) => onSaved(m, saved)}
-            onEnter={onEnter}
-            onOpen={() => onOpenCell(m)}
-          />
+          <ItemCell item={item} month={m} ledger={ledger} budget={item.monthly_budget} onOpen={() => onOpenCell(m)} />
         </td>
       ))}
       <td className={cn(cellClass, "font-medium")}>{formatMoney(sumMoney(filled))}</td>
@@ -517,91 +470,46 @@ function ItemRow({
 function ItemCell({
   item,
   month,
-  col,
   ledger,
   budget,
-  onSaved,
-  onEnter,
   onOpen,
 }: {
   item: LineItem;
   month: string;
-  col: number;
   ledger: Ledger;
   budget: number | null;
-  onSaved: (saved: MonthlyAmount | null) => void;
-  onEnter: (input: HTMLInputElement) => void;
   onOpen: () => void;
 }) {
-  const value = ledger.idx.get(item.id)?.get(month);
   const linked = itemOneOffs(ledger, item.id, month);
   const card = itemCard(ledger, item.id, month);
-  const note = ledger.notes.get(item.id)?.get(month);
-  const saver = useCellSaver(item.id, month, value, onSaved);
   const total = itemMonthTotal(ledger, item.id, month);
   const over = budget != null && total !== undefined && total > budget;
-  const extras = linked.length + card.length;
-
-  if (extras) {
-    // Combined value (typed + one-offs + card): edit through the dialog so the sum stays clear
-    return (
-      <button
-        type="button"
-        onClick={onOpen}
-        className={cn(
-          "inline-flex h-8 items-center gap-1 rounded-md px-1.5 tabular-nums hover:bg-[var(--color-muted)]",
-          over && "text-[var(--color-destructive)]"
-        )}
-        aria-label={`${item.name} ${formatMonth(month, "short")}: ${formatMoney(total ?? 0)} including ${[
-          linked.length && `${linked.length} ${linked.length > 1 ? "manual entries" : "manual entry"}`,
-          card.length && `${card.length} card charge${card.length > 1 ? "s" : ""}`,
-        ]
-          .filter(Boolean)
-          .join(" and ")}`}
-        title={[
-          ...linked.map((o) => `${o.name}: ${formatMoney(o.amount, true)}`),
-          ...card.map((t) => `${t.merchant}: ${formatMoney(t.amount, true)}`),
-        ].join("\n")}
-      >
-        {formatMoney(total ?? 0)}
-        <span className="rounded bg-[var(--color-muted)] px-1 text-[10px] font-medium text-[var(--color-foreground)]">
-          +{extras}
-        </span>
-      </button>
-    );
-  }
 
   return (
-    <div className={cn("inline-flex items-center", over && "[&_input]:text-[var(--color-destructive)]")}>
-      {note && (
-        <button
-          type="button"
-          onClick={onOpen}
-          className="mr-0.5 text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
-          aria-label={`Note: ${note}`}
-          title={note}
-        >
-          <MessageSquare className="h-3 w-3 fill-current" />
-        </button>
+    <button
+      type="button"
+      onClick={onOpen}
+      className={cn(
+        "inline-flex h-8 min-w-12 items-center justify-end rounded-md px-1.5 tabular-nums hover:bg-[var(--color-muted)]",
+        total === undefined && "text-[var(--color-muted-foreground)]",
+        over && "text-[var(--color-destructive)]"
       )}
-      <AmountInput
-        compact
-        value={value}
-        saver={saver}
-        onEnter={onEnter}
-        ariaLabel={`${item.name}, ${formatMonth(month)}`}
-        dataAttrs={{ col }}
-      />
-    </div>
+      aria-label={`${item.name} ${formatMonth(month, "short")}: ${total === undefined ? "nothing yet" : formatMoney(total)}`}
+      title={[
+        ...linked.map((o) => `${o.name}: ${formatMoney(o.amount, true)}`),
+        ...card.map((t) => `${t.merchant}: ${formatMoney(t.amount, true)}`),
+      ].join("\n") || "Add a manual entry"}
+    >
+      {total === undefined ? "·" : formatMoney(total)}
+    </button>
   );
 }
 
-/** Details for one cell: base amount, note and one-offs (or a category's / uncategorized one-offs). */
+/** Details for one cell: the manual entries and card charges that make it up (a line item, a category's "Other", or uncategorized). */
 function CellDialog({
   target,
   ledger,
   onClose,
-  onSaved,
   onEditOneOff,
   onAddOneOff,
   onTransactionsSaved,
@@ -610,7 +518,6 @@ function CellDialog({
   target: CellTarget;
   ledger: Ledger;
   onClose: () => void;
-  onSaved: (itemId: string, month: string, saved: MonthlyAmount | null) => void;
   onEditOneOff: (o: OneOff) => void;
   onAddOneOff: (defaults: { month: string; category_id?: string | null; line_item_id?: string | null }) => void;
   onTransactionsSaved: (saved: Transaction[]) => void;
@@ -640,14 +547,14 @@ function CellDialog({
     target.kind === "item"
       ? `${target.item.name} · ${formatMonth(month)}`
       : target.kind === "category"
-        ? `${target.category.name} manual entries · ${formatMonth(month)}`
+        ? `${target.category.name} · Other · ${formatMonth(month)}`
         : `Uncategorized · ${formatMonth(month)}`;
   const addDefaults =
     target.kind === "item"
       ? { month, category_id: target.item.category_id, line_item_id: target.item.id }
       : target.kind === "category"
         ? { month, category_id: target.category.id }
-        : { month };
+        : null;
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -656,14 +563,10 @@ function CellDialog({
           <DialogTitle>{title}</DialogTitle>
           {target.kind === "item" && (
             <DialogDescription>
-              Total {formatMoney(itemMonthTotal(ledger, target.item.id, month) ?? 0, true)} = typed amount + manual entries
-              {cardList.length > 0 && " + card charges"}
+              Total {formatMoney(itemMonthTotal(ledger, target.item.id, month) ?? 0, true)} = manual entries + card charges
             </DialogDescription>
           )}
         </DialogHeader>
-        {target.kind === "item" && (
-          <ItemCellEditor item={target.item} month={month} ledger={ledger} onSaved={(s) => onSaved(target.item.id, month, s)} />
-        )}
         {cardList.length > 0 && (
           <div className="-mx-4 rounded-md border border-[var(--color-border)] px-4 pt-2 sm:mx-0">
             <p className="text-xs font-medium text-[var(--color-muted-foreground)]">Card charges</p>
@@ -693,72 +596,24 @@ function CellDialog({
           ) : (
             <p className="px-4 py-2 text-sm text-[var(--color-muted-foreground)]">None this month.</p>
           )}
-          <div className="px-2 py-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                onClose();
-                onAddOneOff(addDefaults);
-              }}
-            >
-              <Plus /> Add manual entry
-            </Button>
-          </div>
+          {addDefaults && (
+            <div className="px-2 py-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-[var(--color-primary)]"
+                onClick={() => {
+                  onClose();
+                  onAddOneOff(addDefaults);
+                }}
+              >
+                <Plus /> Add manual entry
+              </Button>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function ItemCellEditor({
-  item,
-  month,
-  ledger,
-  onSaved,
-}: {
-  item: LineItem;
-  month: string;
-  ledger: Ledger;
-  onSaved: (saved: MonthlyAmount | null) => void;
-}) {
-  const value = ledger.idx.get(item.id)?.get(month);
-  const note = ledger.notes.get(item.id)?.get(month) ?? "";
-  const saver = useCellSaver(item.id, month, value, onSaved);
-  const [noteText, setNoteText] = useState(note);
-  const [noteError, setNoteError] = useState<string | null>(null);
-
-  async function commitNote() {
-    if (noteText.trim() === note) return;
-    try {
-      onSaved(await saveNote(item.id, month, noteText));
-      setNoteError(null);
-    } catch (err) {
-      setNoteError(err instanceof Error ? err.message : "Could not save note");
-    }
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <Label htmlFor="cell-amount">Typed amount</Label>
-        <AmountInput id="cell-amount" value={value} saver={saver} />
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="cell-note">Note</Label>
-        <input
-          id="cell-note"
-          disabled={value === undefined}
-          className="h-9 w-full rounded-md border border-[var(--color-input)] bg-transparent px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] disabled:opacity-50"
-          placeholder={value === undefined ? "Enter an amount first" : "e.g. AC ran all month"}
-          value={noteText}
-          onChange={(e) => setNoteText(e.target.value)}
-          onBlur={commitNote}
-          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-        />
-      </div>
-      <FormError>{saver.message ?? noteError}</FormError>
-    </div>
   );
 }
 

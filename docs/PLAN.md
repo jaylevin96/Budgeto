@@ -11,6 +11,8 @@ A household budget tracker that replaces `2026_Budget.xlsx`: quick, accurate dat
 > Phase 1 is built: see the README for setup.
 >
 > **Round 2 (built):** one-off purchases (optionally tied to a category or line item), a collapsible and editable Year grid, monthly budgets with budget vs actual, cell notes, and .xlsx export. Schema: `supabase/migrations/20261020000000_one_offs_budgets.sql`. One-offs were later renamed **manual entries** in the app, added per category with no page of their own (itemized amounts added by hand); the table is still `one_offs`.
+>
+> **Round 3:** typed monthly amounts were retired. Totals come only from card charges and manual entries; every manual entry belongs to a category (line item optional), category-level ones show in an "Other" row, and entries can repeat monthly. Migration `20261023000000_manual_entries_only.sql` turned existing `monthly_amounts` into manual entries.
 
 ---
 
