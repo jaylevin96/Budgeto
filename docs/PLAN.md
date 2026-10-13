@@ -9,6 +9,8 @@ A household budget tracker that replaces `2026_Budget.xlsx`: quick, accurate dat
 > - **401k and HSA** are a `savings` category kind: tracked and charted, but not counted as spending. "Left over" = income − spending − savings, which is the same as the spreadsheet's Net Income.
 >
 > Phase 1 is built: see the README for setup.
+>
+> **Round 2 (built):** one-off purchases (optionally tied to a category or line item), a collapsible and editable Year grid, monthly budgets with budget vs actual, cell notes, and .xlsx export. Schema: `supabase/migrations/20261020000000_one_offs_budgets.sql`.
 
 ---
 

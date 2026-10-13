@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   Bar,
@@ -14,12 +14,15 @@ import {
   YAxis,
   type TooltipProps,
 } from "recharts";
-import { PencilLine } from "lucide-react";
+import { PencilLine, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
 import { Select } from "@/components/ui/select";
+import { BudgetBar } from "@/components/BudgetBar";
 import { EmptyBudget } from "@/components/EmptyBudget";
+import { OneOffDialog } from "@/components/OneOffDialog";
+import { OneOffList } from "@/components/OneOffList";
 import { StepperNav } from "@/components/StepperNav";
 import { SummaryTiles } from "@/components/SummaryTiles";
 import { useBudget } from "@/hooks/useBudget";
@@ -30,7 +33,7 @@ import {
   formatMoney,
   formatMoneyCompact,
   formatMonth,
-  indexAmounts,
+  itemMonthTotal,
   monthKey,
   monthSlug,
   MONTH_LONG,
@@ -39,6 +42,8 @@ import {
   summarizeMonth,
   sumMoney,
   totalForCategoryMonth,
+  uncategorizedTotal,
+  type OneOff,
   type MonthSummary,
 } from "@/lib/budget";
 import { cn } from "@/lib/utils";
@@ -51,16 +56,17 @@ export function Dashboard() {
   const thisMonth = currentMonthKey();
   const year = Number(searchParams.get("year")) || parseMonthKey(thisMonth).year;
 
-  const { categories, items, amounts, loading, error, reload } = useBudget(
+  const { categories, items, oneOffs, ledger, loading, error, reload, applyOneOff } = useBudget(
     monthKey(year - 1, 0),
     monthKey(year + 1, 0)
   );
-  const idx = useMemo(() => indexAmounts(amounts), [amounts]);
   const [breakdownScope, setBreakdownScope] = useState<"month" | "year">("month");
+  const [budgetScope, setBudgetScope] = useState<"month" | "year">("month");
+  const [editingOneOff, setEditingOneOff] = useState<OneOff | null>(null);
 
   const months = Array.from({ length: 12 }, (_, m) => monthKey(year, m));
-  const summaries = months.map((m) => summarizeMonth(m, categories, items, idx));
-  const lastWithData = [...summaries].reverse().find((s) => s.entered > 0)?.month ?? null;
+  const summaries = months.map((m) => summarizeMonth(ledger, m));
+  const lastWithData = [...summaries].reverse().find((s) => s.hasData)?.month ?? null;
   const shownMonths = lastWithData ? months.filter((m) => m <= lastWithData) : months;
 
   const monthParam = searchParams.get("month");
@@ -73,24 +79,30 @@ export function Dashboard() {
   const selectedIdx = parseMonthKey(selectedMonth).month;
 
   const current = summaries[selectedIdx];
-  const previous = summarizeMonth(addMonths(selectedMonth, -1), categories, items, idx);
+  const previous = summarizeMonth(ledger, addMonths(selectedMonth, -1));
 
   // Year to date through the selected month, vs the same months last year
   const ytd = sumSummaries(summaries.slice(0, selectedIdx + 1));
   const lastYearSummaries = Array.from({ length: selectedIdx + 1 }, (_, m) =>
-    summarizeMonth(monthKey(year - 1, m), categories, items, idx)
+    summarizeMonth(ledger, monthKey(year - 1, m))
   );
-  const lastYtd = lastYearSummaries.some((s) => s.entered > 0) ? sumSummaries(lastYearSummaries) : null;
+  const lastYtd = lastYearSummaries.some((s) => s.hasData) ? sumSummaries(lastYearSummaries) : null;
 
-  const expenseCats = categories.filter((c) => c.kind === "expense");
-  const catYearTotals = expenseCats
-    .map((c) => ({ cat: c, total: sumMoney(shownMonths.map((m) => totalForCategoryMonth(c.id, m, items, idx))) }))
-    .filter((c) => c.total > 0)
+  // Spending groups: expense categories plus uncategorized one-offs
+  const spendGroups: SpendGroup[] = [
+    ...categories
+      .filter((c) => c.kind === "expense")
+      .map((c) => ({ id: c.id, name: c.name, total: (m: string) => totalForCategoryMonth(ledger, c.id, m) })),
+    { id: "uncategorized", name: "Uncategorized one-offs", total: (m: string) => uncategorizedTotal(ledger, m) },
+  ];
+  const groupYearTotals = spendGroups
+    .map((g) => ({ group: g, total: sumMoney(shownMonths.map(g.total)) }))
+    .filter((g) => g.total > 0)
     .sort((a, b) => b.total - a.total);
   // Color follows the category, not its rank: assign slots by the category's sort order
-  const seriesCats = catYearTotals.slice(0, MAX_CATEGORY_SERIES).map((c) => c.cat);
-  const orderedSeries = expenseCats.filter((c) => seriesCats.includes(c));
-  const hasOther = catYearTotals.length > MAX_CATEGORY_SERIES;
+  const seriesIds = new Set(groupYearTotals.slice(0, MAX_CATEGORY_SERIES).map((g) => g.group.id));
+  const orderedSeries = spendGroups.filter((g) => seriesIds.has(g.id));
+  const hasOther = groupYearTotals.length > MAX_CATEGORY_SERIES;
 
   const monthlyData = shownMonths.map((m, i) => ({
     label: MONTH_SHORT[parseMonthKey(m).month],
@@ -104,9 +116,9 @@ export function Dashboard() {
   const stackedData = shownMonths.map((m) => {
     const row: Record<string, number | string> = { label: MONTH_SHORT[parseMonthKey(m).month], month: m };
     let other = 0;
-    for (const c of expenseCats) {
-      const v = totalForCategoryMonth(c.id, m, items, idx);
-      if (orderedSeries.includes(c)) row[c.name] = v;
+    for (const g of spendGroups) {
+      const v = g.total(m);
+      if (seriesIds.has(g.id)) row[g.name] = v;
       else other += v;
     }
     if (hasOther) row.Other = Math.round(other * 100) / 100;
@@ -114,27 +126,40 @@ export function Dashboard() {
   });
 
   const breakdownMonths = breakdownScope === "month" ? [selectedMonth] : months.slice(0, selectedIdx + 1);
-  const breakdown = expenseCats
-    .map((c) => ({
-      name: c.name,
-      total: sumMoney(breakdownMonths.map((m) => totalForCategoryMonth(c.id, m, items, idx))),
-    }))
+  const breakdown = spendGroups
+    .map((g) => ({ name: g.name, total: sumMoney(breakdownMonths.map(g.total)) }))
     .filter((c) => c.total > 0)
     .sort((a, b) => b.total - a.total);
 
   // Biggest line-item moves vs the previous month
   const prevMonth = addMonths(selectedMonth, -1);
-  const kindByCat = new Map(categories.map((c) => [c.id, c.kind]));
   const changes = items
-    .filter((i) => kindByCat.get(i.category_id) === "expense")
+    .filter((i) => ledger.kindByCategory.get(i.category_id) === "expense")
     .map((i) => {
-      const now = idx.get(i.id)?.get(selectedMonth);
-      const before = idx.get(i.id)?.get(prevMonth);
+      const now = itemMonthTotal(ledger, i.id, selectedMonth);
+      const before = itemMonthTotal(ledger, i.id, prevMonth);
       return { item: i, now: now ?? 0, before: before ?? 0, delta: (now ?? 0) - (before ?? 0), known: now !== undefined };
     })
     .filter((c) => c.known && Math.abs(c.delta) >= 1)
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
     .slice(0, 6);
+
+  // Budget vs actual for categories that have a monthly budget
+  const budgetMonths = budgetScope === "month" ? [selectedMonth] : months.slice(0, selectedIdx + 1);
+  const budgetRows = categories
+    .filter((c) => c.monthly_budget != null && c.kind !== "income" && !c.archived)
+    .map((c) => ({
+      cat: c,
+      budget: sumMoney(budgetMonths.map(() => c.monthly_budget!)),
+      spent: sumMoney(budgetMonths.map((m) => totalForCategoryMonth(ledger, c.id, m))),
+    }));
+  const budgetRemaining = sumMoney([...budgetRows.map((r) => r.budget), ...budgetRows.map((r) => -r.spent)]);
+
+  const bigPurchases = oneOffs
+    .filter((o) => o.month.startsWith(`${year}-`))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 8);
+  const yearOneOffTotal = sumMoney(oneOffs.filter((o) => o.month.startsWith(`${year}-`)).map((o) => o.amount));
 
   function setYear(y: number) {
     setSearchParams({ year: String(y) });
@@ -290,22 +315,7 @@ export function Dashboard() {
                     {breakdownScope === "month" ? formatMonth(selectedMonth) : `Jan–${MONTH_SHORT[selectedIdx]} ${year}`}
                   </CardDescription>
                 </div>
-                <div className="flex rounded-md border border-[var(--color-border)] p-0.5 text-xs" role="group">
-                  {(["month", "year"] as const).map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      aria-pressed={breakdownScope === s}
-                      onClick={() => setBreakdownScope(s)}
-                      className={cn(
-                        "rounded px-2.5 py-1",
-                        breakdownScope === s && "bg-[var(--color-accent)] font-medium"
-                      )}
-                    >
-                      {s === "month" ? "Month" : "YTD"}
-                    </button>
-                  ))}
-                </div>
+                <ScopeToggle scope={breakdownScope} onChange={setBreakdownScope} />
               </CardHeader>
               <CardContent className="px-2 sm:px-6" style={{ height: Math.max(160, breakdown.length * 34 + 24) }}>
                 {breakdown.length === 0 ? (
@@ -335,6 +345,57 @@ export function Dashboard() {
                   </ResponsiveContainer>
                 )}
               </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 pb-2">
+                <div className="space-y-1.5">
+                  <CardTitle className="text-lg">Budget vs actual</CardTitle>
+                  <CardDescription>
+                    {budgetRows.length
+                      ? `${budgetRemaining >= 0 ? `${formatMoney(budgetRemaining)} left` : `${formatMoney(-budgetRemaining)} over`} across budgeted categories`
+                      : "Set monthly budgets on categories in Settings."}
+                  </CardDescription>
+                </div>
+                <ScopeToggle scope={budgetScope} onChange={setBudgetScope} />
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {budgetRows.length === 0 ? (
+                  <Button asChild variant="outline" size="sm">
+                    <Link to="/settings">Set budgets</Link>
+                  </Button>
+                ) : (
+                  budgetRows.map((r) => (
+                    <div key={r.cat.id}>
+                      <div className="mb-1 text-sm font-medium">{r.cat.name}</div>
+                      <BudgetBar spent={r.spent} budget={r.budget} />
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <ShoppingBag className="h-4 w-4" aria-hidden /> Big purchases
+                </CardTitle>
+                <CardDescription>
+                  {bigPurchases.length
+                    ? `${formatMoney(yearOneOffTotal)} in one-off purchases in ${year}.`
+                    : `No one-off purchases in ${year} yet.`}
+                </CardDescription>
+              </CardHeader>
+              {bigPurchases.length > 0 && (
+                <OneOffList oneOffs={bigPurchases} categories={categories} items={items} showMonth onEdit={setEditingOneOff} />
+              )}
+              <div className="px-4 pb-4 pt-2">
+                <Button asChild variant="ghost" size="sm">
+                  <Link to={`/one-offs?year=${year}`}>See all one-offs</Link>
+                </Button>
+              </div>
             </Card>
           </div>
 
@@ -368,6 +429,39 @@ export function Dashboard() {
           </Card>
         </>
       )}
+      {editingOneOff && (
+        <OneOffDialog
+          oneOff={editingOneOff}
+          defaults={{ month: editingOneOff.month }}
+          categories={categories}
+          items={items}
+          onClose={() => setEditingOneOff(null)}
+          onSaved={(id, saved) => {
+            setEditingOneOff(null);
+            applyOneOff(id, saved);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+type SpendGroup = { id: string; name: string; total: (month: string) => number };
+
+function ScopeToggle({ scope, onChange }: { scope: "month" | "year"; onChange: (s: "month" | "year") => void }) {
+  return (
+    <div className="flex rounded-md border border-[var(--color-border)] p-0.5 text-xs" role="group">
+      {(["month", "year"] as const).map((s) => (
+        <button
+          key={s}
+          type="button"
+          aria-pressed={scope === s}
+          onClick={() => onChange(s)}
+          className={cn("rounded px-2.5 py-1", scope === s && "bg-[var(--color-accent)] font-medium")}
+        >
+          {s === "month" ? "Month" : "YTD"}
+        </button>
+      ))}
     </div>
   );
 }

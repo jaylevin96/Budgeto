@@ -6,6 +6,7 @@ import { Login } from "@/pages/Login";
 import { ResetPassword } from "@/pages/ResetPassword";
 import { MonthEntry } from "@/pages/MonthEntry";
 import { YearGrid } from "@/pages/YearGrid";
+import { OneOffs } from "@/pages/OneOffs";
 import { Settings } from "@/pages/Settings";
 
 // Charts (recharts) and the spreadsheet parser (xlsx) are heavy; load them on demand
@@ -59,6 +60,7 @@ export function AppRoutes() {
         <Route path="/month/:month" element={<MonthEntry />} />
         <Route path="/year" element={<YearGrid />} />
         <Route path="/year/:year" element={<YearGrid />} />
+        <Route path="/one-offs" element={<OneOffs />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/settings/import" element={<Import />} />
       </Route>

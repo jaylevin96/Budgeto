@@ -1,34 +1,44 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, Check, CheckCheck, Loader2, Settings2, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCheck, MessageSquare, Plus, Settings2, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
+import { AmountInput } from "@/components/AmountInput";
+import { useCellSaver } from "@/hooks/useCellSaver";
+import { BudgetBar } from "@/components/BudgetBar";
 import { EmptyBudget } from "@/components/EmptyBudget";
+import { OneOffDialog } from "@/components/OneOffDialog";
+import { OneOffList } from "@/components/OneOffList";
 import { StepperNav } from "@/components/StepperNav";
 import { SummaryTiles } from "@/components/SummaryTiles";
 import { useBudget } from "@/hooks/useBudget";
 import {
   addMonths,
   anomalyHint,
+  categoryOneOffs,
   currentMonthKey,
   formatMoney,
   formatMonth,
-  indexAmounts,
+  itemMonthTotal,
+  itemOneOffs,
   KIND_LABEL,
   monthKeyFromSlug,
   monthSlug,
-  parseAmount,
-  saveAmount,
   saveAmountsBulk,
+  saveNote,
   suggestedAmount,
   summarizeMonth,
   sumMoney,
-  type AmountIndex,
+  totalForCategoryMonth,
+  type Ledger,
   type LineItem,
   type MonthlyAmount,
+  type OneOff,
 } from "@/lib/budget";
 import { cn } from "@/lib/utils";
+
+type EditingOneOff = { oneOff: OneOff | null; category_id?: string | null; line_item_id?: string | null } | null;
 
 export function MonthEntry() {
   const params = useParams();
@@ -36,19 +46,19 @@ export function MonthEntry() {
   const month = monthKeyFromSlug(params.month) ?? currentMonthKey();
 
   // Load the previous 12 months too, for suggestions and "usually about" hints
-  const { categories, items, amounts, loading, error, reload, applyAmount, applyAmounts } = useBudget(
-    addMonths(month, -12),
-    addMonths(month, 1)
-  );
+  const { categories, items, oneOffs, ledger, loading, error, reload, applyAmount, applyAmounts, applyOneOff } =
+    useBudget(addMonths(month, -12), addMonths(month, 1));
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [filling, setFilling] = useState(false);
   const [fillError, setFillError] = useState<string | null>(null);
+  const [editingOneOff, setEditingOneOff] = useState<EditingOneOff>(null);
 
-  const idx = useMemo(() => indexAmounts(amounts), [amounts]);
+  const idx = ledger.idx;
   const activeCategories = categories.filter((c) => !c.archived);
   const activeItems = items.filter((i) => !i.archived && activeCategories.some((c) => c.id === i.category_id));
-  const summary = summarizeMonth(month, categories, activeItems, idx);
-  const prevSummary = summarizeMonth(addMonths(month, -1), categories, activeItems, idx);
+  const summary = summarizeMonth(ledger, month);
+  const prevSummary = summarizeMonth(ledger, addMonths(month, -1));
+  const monthOneOffs = oneOffs.filter((o) => o.month === month);
 
   const pendingSuggestions = activeItems
     .filter((i) => idx.get(i.id)?.get(month) === undefined)
@@ -84,6 +94,7 @@ export function MonthEntry() {
   }, []);
 
   const go = (delta: number) => navigate(`/month/${monthSlug(addMonths(month, delta))}`);
+  const enteredCount = activeItems.filter((i) => idx.get(i.id)?.has(month)).length;
 
   if (!loading && !error && categories.length === 0) return <EmptyBudget onSeeded={reload} />;
 
@@ -98,6 +109,9 @@ export function MonthEntry() {
           nextLabel="Next month"
         />
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setEditingOneOff({ oneOff: null })}>
+            <Plus /> One-off
+          </Button>
           <Button asChild variant="ghost" size="sm">
             <Link to="/settings">
               <Settings2 /> Edit items
@@ -117,16 +131,16 @@ export function MonthEntry() {
               <div className="min-w-48 flex-1">
                 <div className="mb-1 flex justify-between text-sm">
                   <span className="font-medium">
-                    {summary.entered} of {activeItems.length} items entered
+                    {enteredCount} of {activeItems.length} items entered
                   </span>
                   <span className="text-[var(--color-muted-foreground)]">
-                    {activeItems.length ? Math.round((summary.entered / activeItems.length) * 100) : 0}%
+                    {activeItems.length ? Math.round((enteredCount / activeItems.length) * 100) : 0}%
                   </span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-[var(--color-muted)]">
                   <div
                     className="h-full rounded-full bg-[var(--color-success)] transition-all"
-                    style={{ width: `${activeItems.length ? (summary.entered / activeItems.length) * 100 : 0}%` }}
+                    style={{ width: `${activeItems.length ? (enteredCount / activeItems.length) * 100 : 0}%` }}
                   />
                 </div>
               </div>
@@ -160,18 +174,24 @@ export function MonthEntry() {
           {activeCategories.map((cat) => {
             const catItems = activeItems.filter((i) => i.category_id === cat.id);
             const visible = onlyMissing ? catItems.filter((i) => idx.get(i.id)?.get(month) === undefined) : catItems;
-            if (!visible.length) return null;
-            const subtotal = sumMoney(catItems.map((i) => idx.get(i.id)?.get(month) ?? 0));
+            const catOneOffs = categoryOneOffs(ledger, cat.id, month);
+            if (!visible.length && (onlyMissing || !catOneOffs.length)) return null;
+            const subtotal = totalForCategoryMonth(ledger, cat.id, month);
             return (
               <Card key={cat.id}>
-                <div className="flex items-baseline justify-between border-b border-[var(--color-border)] px-4 py-3">
-                  <h2 className="font-semibold">
-                    {cat.name}
-                    <span className="ml-2 text-xs font-normal text-[var(--color-muted-foreground)]">
-                      {KIND_LABEL[cat.kind]}
-                    </span>
-                  </h2>
-                  <span className="text-sm font-medium tabular-nums">{formatMoney(subtotal, true)}</span>
+                <div className="space-y-2 border-b border-[var(--color-border)] px-4 py-3">
+                  <div className="flex items-baseline justify-between">
+                    <h2 className="font-semibold">
+                      {cat.name}
+                      <span className="ml-2 text-xs font-normal text-[var(--color-muted-foreground)]">
+                        {KIND_LABEL[cat.kind]}
+                      </span>
+                    </h2>
+                    <span className="text-sm font-medium tabular-nums">{formatMoney(subtotal, true)}</span>
+                  </div>
+                  {cat.monthly_budget != null && cat.kind !== "income" && (
+                    <BudgetBar spent={subtotal} budget={cat.monthly_budget} />
+                  )}
                 </div>
                 <ul className="divide-y divide-[var(--color-border)]">
                   {visible.map((item) => (
@@ -179,81 +199,123 @@ export function MonthEntry() {
                       key={`${item.id}|${month}`}
                       item={item}
                       month={month}
-                      idx={idx}
+                      ledger={ledger}
                       onSaved={(saved) => applyAmount(item.id, month, saved)}
                       onEnter={focusNext}
+                      onEditOneOff={(o) => setEditingOneOff({ oneOff: o })}
                     />
                   ))}
                 </ul>
+                {catOneOffs.length > 0 && !onlyMissing && (
+                  <div className="border-t border-[var(--color-border)]">
+                    <p className="px-4 pt-2 text-xs font-medium text-[var(--color-muted-foreground)]">One-offs</p>
+                    <OneOffList
+                      oneOffs={catOneOffs}
+                      categories={categories}
+                      items={items}
+                      showTarget={false}
+                      onEdit={(o) => setEditingOneOff({ oneOff: o })}
+                    />
+                  </div>
+                )}
               </Card>
             );
           })}
-          {onlyMissing && summary.entered === activeItems.length && (
+
+          <Card>
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
+              <h2 className="flex items-center gap-2 font-semibold">
+                <ShoppingBag className="h-4 w-4" aria-hidden /> One-off purchases
+              </h2>
+              <span className="text-sm font-medium tabular-nums">{formatMoney(summary.oneOffs, true)}</span>
+            </div>
+            {monthOneOffs.length ? (
+              <OneOffList
+                oneOffs={monthOneOffs}
+                categories={categories}
+                items={items}
+                onEdit={(o) => setEditingOneOff({ oneOff: o })}
+              />
+            ) : (
+              <p className="px-4 py-3 text-sm text-[var(--color-muted-foreground)]">
+                Nothing big this month. Add flights, a new console, or anything else one-time.
+              </p>
+            )}
+            <div className="px-2 py-1">
+              <Button variant="ghost" size="sm" onClick={() => setEditingOneOff({ oneOff: null })}>
+                <Plus /> Add one-off
+              </Button>
+            </div>
+          </Card>
+
+          {onlyMissing && enteredCount === activeItems.length && (
             <p className="py-8 text-center text-[var(--color-muted-foreground)]">
               Everything for {formatMonth(month)} is entered.
             </p>
           )}
         </div>
       )}
+
+      {editingOneOff && (
+        <OneOffDialog
+          oneOff={editingOneOff.oneOff}
+          defaults={{ month, category_id: editingOneOff.category_id, line_item_id: editingOneOff.line_item_id }}
+          categories={categories}
+          items={items}
+          onClose={() => setEditingOneOff(null)}
+          onSaved={(id, saved) => {
+            setEditingOneOff(null);
+            applyOneOff(id, saved);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-type SaveState = "idle" | "saving" | "saved" | "error";
-
 function AmountRow({
   item,
   month,
-  idx,
+  ledger,
   onSaved,
   onEnter,
+  onEditOneOff,
 }: {
   item: LineItem;
   month: string;
-  idx: AmountIndex;
+  ledger: Ledger;
   onSaved: (saved: MonthlyAmount | null) => void;
   onEnter: (input: HTMLInputElement) => void;
+  onEditOneOff: (o: OneOff) => void;
 }) {
+  const idx = ledger.idx;
   const value = idx.get(item.id)?.get(month);
+  const note = ledger.notes.get(item.id)?.get(month) ?? "";
+  const linked = itemOneOffs(ledger, item.id, month);
   const suggestion = value === undefined ? suggestedAmount(item, month, idx) : null;
-  const [text, setText] = useState(value === undefined ? "" : String(value));
-  const [state, setState] = useState<SaveState>("idle");
-  const [message, setMessage] = useState<string | null>(null);
-  const focused = useRef(false);
-  const cancelled = useRef(false);
+  const saver = useCellSaver(item.id, month, value, onSaved);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteText, setNoteText] = useState(note);
+  const [noteError, setNoteError] = useState<string | null>(null);
 
-  // Keep in sync with outside changes (e.g. "Fill recurring") while not editing
-  useEffect(() => {
-    if (!focused.current) setText(value === undefined ? "" : String(value));
-  }, [value]);
-
-  async function commit(raw: string) {
-    const parsed = parseAmount(raw);
-    if (Number.isNaN(parsed)) {
-      setState("error");
-      setMessage("Enter a number like 125 or 125.40");
+  async function commitNote() {
+    if (noteText.trim() === note) {
+      setNoteOpen(false);
       return;
     }
-    if ((parsed ?? undefined) === value) {
-      setState("idle");
-      setMessage(null);
-      return;
-    }
-    setState("saving");
-    setMessage(null);
     try {
-      const saved = await saveAmount(item.id, month, parsed);
-      onSaved(saved);
-      setText(parsed === null ? "" : String(parsed));
-      setState("saved");
+      onSaved(await saveNote(item.id, month, noteText));
+      setNoteOpen(false);
+      setNoteError(null);
     } catch (err) {
-      setState("error");
-      setMessage(err instanceof Error ? err.message : "Could not save");
+      setNoteError(err instanceof Error ? err.message : "Could not save note");
     }
   }
 
   const hint = value !== undefined && value > 0 ? anomalyHint(item, month, value, idx) : null;
+  const total = itemMonthTotal(ledger, item.id, month) ?? 0;
   const inputId = `amt-${item.id}`;
+  const message = saver.message ?? noteError;
 
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
@@ -274,63 +336,68 @@ function AmountRow({
             variant="outline"
             size="sm"
             className="h-9 px-2 text-xs"
-            onClick={() => commit(String(suggestion))}
+            onClick={() => saver.commit(String(suggestion))}
             aria-label={`Use ${formatMoney(suggestion, true)} for ${item.name}`}
             title={item.recurrence === "fixed" ? "Use the usual amount" : "Use last month's amount"}
           >
             <Check /> {formatMoney(suggestion)}
           </Button>
         )}
-        <div className="relative">
-          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-[var(--color-muted-foreground)]">
-            $
-          </span>
+        {value !== undefined && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={cn("h-9 w-9", !note && "text-[var(--color-muted-foreground)]")}
+            onClick={() => {
+              setNoteText(note);
+              setNoteOpen((o) => !o);
+            }}
+            aria-label={note ? `Edit note for ${item.name}` : `Add note for ${item.name}`}
+            aria-expanded={noteOpen}
+            title={note || "Add a note"}
+          >
+            <MessageSquare className={cn(note && "fill-current")} />
+          </Button>
+        )}
+        <AmountInput id={inputId} value={value} saver={saver} onEnter={onEnter} />
+      </div>
+      {note && !noteOpen && (
+        <p className="w-full text-right text-xs text-[var(--color-muted-foreground)]">“{note}”</p>
+      )}
+      {noteOpen && (
+        <div className="flex w-full justify-end">
           <input
-            id={inputId}
-            data-amount
-            inputMode="decimal"
-            autoComplete="off"
-            className={cn(
-              "h-9 w-32 rounded-md border bg-transparent pl-6 pr-7 text-right text-base tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] md:text-sm",
-              state === "error" ? "border-[var(--color-destructive)]" : "border-[var(--color-input)]",
-              value === undefined && "border-dashed"
-            )}
-            placeholder="—"
-            value={text}
-            onFocus={(e) => {
-              focused.current = true;
-              e.target.select();
-            }}
-            onChange={(e) => {
-              setText(e.target.value);
-              if (state !== "idle") setState("idle");
-            }}
-            onBlur={(e) => {
-              focused.current = false;
-              if (cancelled.current) {
-                cancelled.current = false;
-                return;
-              }
-              commit(e.target.value);
-            }}
+            autoFocus
+            aria-label={`Note for ${item.name}`}
+            className="h-8 w-full max-w-sm rounded-md border border-[var(--color-input)] bg-transparent px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
+            placeholder="e.g. AC ran all month"
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            onBlur={commitNote}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                onEnter(e.currentTarget);
-              } else if (e.key === "Escape") {
-                cancelled.current = true;
-                setText(value === undefined ? "" : String(value));
-                e.currentTarget.blur();
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") {
+                setNoteText(note);
+                setNoteOpen(false);
               }
             }}
           />
-          <span className="absolute right-2 top-1/2 -translate-y-1/2" aria-live="polite">
-            {state === "saving" && <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--color-muted-foreground)]" />}
-            {state === "saved" && <Check className="h-3.5 w-3.5 text-[var(--color-success)]" aria-label="Saved" />}
-            {state === "error" && <X className="h-3.5 w-3.5 text-[var(--color-destructive)]" aria-label="Not saved" />}
-          </span>
         </div>
-      </div>
+      )}
+      {linked.length > 0 && (
+        <div className="w-full space-y-0.5 text-right text-xs text-[var(--color-muted-foreground)]">
+          {linked.map((o) => (
+            <button key={o.id} type="button" className="block w-full text-right hover:underline" onClick={() => onEditOneOff(o)}>
+              + {formatMoney(o.amount, true)} {o.name}
+            </button>
+          ))}
+          <p className="font-medium text-[var(--color-foreground)]">Total {formatMoney(total, true)}</p>
+        </div>
+      )}
+      {item.monthly_budget != null && (
+        <BudgetBar spent={total} budget={item.monthly_budget} className="w-full" />
+      )}
       {(message || hint) && (
         <p
           className={cn(

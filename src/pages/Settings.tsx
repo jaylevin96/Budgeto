@@ -125,7 +125,10 @@ export function Settings() {
                   {cat.name}
                   {cat.archived && <span className="ml-2 text-xs font-normal">(archived)</span>}
                 </h2>
-                <p className="text-xs text-[var(--color-muted-foreground)]">{KIND_LABEL[cat.kind]}</p>
+                <p className="text-xs text-[var(--color-muted-foreground)]">
+                  {KIND_LABEL[cat.kind]}
+                  {cat.monthly_budget != null && ` · Budget ${formatMoney(cat.monthly_budget)}/mo`}
+                </p>
               </div>
               <Button
                 variant="ghost"
@@ -166,6 +169,7 @@ export function Settings() {
                       {RECURRENCE_LABEL[item.recurrence]}
                       {item.recurrence === "fixed" && item.default_amount != null &&
                         ` · ${formatMoney(item.default_amount, true)}`}
+                      {item.monthly_budget != null && ` · Budget ${formatMoney(item.monthly_budget)}/mo`}
                     </div>
                   </div>
                   <Button
@@ -252,15 +256,18 @@ function CategoryDialog({
   const [name, setName] = useState(category?.name ?? "");
   const [kind, setKind] = useState<CategoryKind>(category?.kind ?? "expense");
   const [archived, setArchived] = useState(category?.archived ?? false);
+  const [budgetText, setBudgetText] = useState(category?.monthly_budget != null ? String(category.monthly_budget) : "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return setError("Name is required");
+    const budget = parseAmount(budgetText);
+    if (Number.isNaN(budget)) return setError("Budget must be a number like 600 or 75.50");
     setBusy(true);
     setError(null);
-    const row = { name: name.trim(), kind, archived };
+    const row = { name: name.trim(), kind, archived, monthly_budget: kind === "income" ? null : budget };
     const { error: err } = category
       ? await supabase.from("categories").update(row).eq("id", category.id)
       : await supabase.from("categories").insert({ ...row, sort_order: nextSortOrder });
@@ -273,7 +280,7 @@ function CategoryDialog({
     if (!category) return;
     if (
       !window.confirm(
-        `Delete "${category.name}" and ALL of its line items and every amount ever entered for them? Archive it instead to keep history.`
+        `Delete "${category.name}" and ALL of its line items and every amount ever entered for them? Its one-off purchases are kept as uncategorized. Archive it instead to keep history.`
       )
     )
       return;
@@ -306,6 +313,9 @@ function CategoryDialog({
               <option value="savings">Savings</option>
             </Select>
           </div>
+          {kind !== "income" && (
+            <BudgetField id="cat-budget" value={budgetText} onChange={setBudgetText} />
+          )}
           {category && (
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" className="h-4 w-4" checked={archived} onChange={(e) => setArchived(e.target.checked)} />
@@ -352,6 +362,7 @@ function ItemDialog({
   const [recurrence, setRecurrence] = useState<Recurrence>(item?.recurrence ?? "none");
   const [amountText, setAmountText] = useState(item?.default_amount != null ? String(item.default_amount) : "");
   const [archived, setArchived] = useState(item?.archived ?? false);
+  const [budgetText, setBudgetText] = useState(item?.monthly_budget != null ? String(item.monthly_budget) : "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -361,6 +372,8 @@ function ItemDialog({
     const amount = parseAmount(amountText);
     if (Number.isNaN(amount)) return setError("Usual amount must be a number like 4700 or 85.50");
     if (recurrence === "fixed" && amount === null) return setError("Fixed items need a usual amount");
+    const budget = parseAmount(budgetText);
+    if (Number.isNaN(budget)) return setError("Budget must be a number like 600 or 75.50");
     setBusy(true);
     setError(null);
     const row = {
@@ -368,6 +381,7 @@ function ItemDialog({
       category_id: catId,
       recurrence,
       default_amount: recurrence === "none" ? null : amount,
+      monthly_budget: budget,
       archived,
     };
     const { error: err } = item
@@ -380,7 +394,7 @@ function ItemDialog({
 
   async function handleDelete() {
     if (!item) return;
-    if (!window.confirm(`Delete "${item.name}" and every amount entered for it? Archive it instead to keep history.`)) return;
+    if (!window.confirm(`Delete "${item.name}" and every amount entered for it? Its one-off purchases stay in the category. Archive it instead to keep history.`)) return;
     setBusy(true);
     const { error: err } = await supabase.from("line_items").delete().eq("id", item.id);
     setBusy(false);
@@ -432,6 +446,7 @@ function ItemDialog({
               />
             </div>
           )}
+          <BudgetField id="item-budget" value={budgetText} onChange={setBudgetText} />
           {item && (
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" className="h-4 w-4" checked={archived} onChange={(e) => setArchived(e.target.checked)} />
@@ -455,5 +470,16 @@ function ItemDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function BudgetField({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>
+        Monthly budget <span className="font-normal">(optional)</span>
+      </Label>
+      <Input id={id} inputMode="decimal" value={value} onChange={(e) => onChange(e.target.value)} placeholder="No budget" />
+    </div>
   );
 }

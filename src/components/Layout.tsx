@@ -1,5 +1,5 @@
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { CalendarDays, LayoutDashboard, LogOut, Moon, Settings, Sheet, Sun, Wallet } from "lucide-react";
+import { CalendarDays, LayoutDashboard, LogOut, Moon, Settings, Sheet, ShoppingBag, Sun, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
 import { useTheme } from "@/hooks/useTheme";
@@ -24,6 +24,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
     { to: `/month/${monthSlug(thisMonth)}`, label: "Month", icon: CalendarDays, match: "/month" },
     { to: `/year/${thisMonth.slice(0, 4)}`, label: "Year", icon: Sheet, match: "/year" },
+    { to: "/one-offs", label: "One-offs", icon: ShoppingBag, match: "/one-offs" },
     { to: "/settings", label: "Settings", icon: Settings, match: "/settings" },
   ];
 

@@ -9,6 +9,7 @@ export type Category = {
   kind: CategoryKind;
   sort_order: number;
   archived: boolean;
+  monthly_budget: number | null;
 };
 
 export type LineItem = {
@@ -19,6 +20,7 @@ export type LineItem = {
   default_amount: number | null;
   sort_order: number;
   archived: boolean;
+  monthly_budget: number | null;
 };
 
 export type MonthlyAmount = {
@@ -27,6 +29,18 @@ export type MonthlyAmount = {
   /** First of month, YYYY-MM-01 */
   month: string;
   amount: number;
+  note: string | null;
+};
+
+/** A bigger one-time purchase, optionally tied to a category and/or line item. */
+export type OneOff = {
+  id: string;
+  name: string;
+  amount: number;
+  /** First of month, YYYY-MM-01 */
+  month: string;
+  category_id: string | null;
+  line_item_id: string | null;
   note: string | null;
 };
 
@@ -116,31 +130,38 @@ export function sumMoney(values: number[]): number {
 
 // ---------- Data access ----------
 
-export type BudgetData = {
-  categories: Category[];
-  items: LineItem[];
-  amounts: MonthlyAmount[];
-};
+const num = (v: unknown) => (v == null ? null : Number(v));
 
 export async function fetchStructure(): Promise<{ categories: Category[]; items: LineItem[] }> {
   const [cats, items] = await Promise.all([
-    supabase.from("categories").select("id, name, kind, sort_order, archived").order("sort_order").order("name"),
+    supabase
+      .from("categories")
+      .select("id, name, kind, sort_order, archived, monthly_budget")
+      .order("sort_order")
+      .order("name"),
     supabase
       .from("line_items")
-      .select("id, category_id, name, recurrence, default_amount, sort_order, archived")
+      .select("id, category_id, name, recurrence, default_amount, sort_order, archived, monthly_budget")
       .order("sort_order")
       .order("name"),
   ]);
   if (cats.error) throw cats.error;
   if (items.error) throw items.error;
   return {
-    categories: cats.data as Category[],
+    categories: (cats.data as Category[]).map((c) => ({ ...c, monthly_budget: num(c.monthly_budget) })),
     items: (items.data as LineItem[]).map((i) => ({
       ...i,
-      default_amount: i.default_amount == null ? null : Number(i.default_amount),
+      default_amount: num(i.default_amount),
+      monthly_budget: num(i.monthly_budget),
     })),
   };
 }
+
+const AMOUNT_COLUMNS = "id, line_item_id, month, amount, note";
+const ONE_OFF_COLUMNS = "id, name, amount, month, category_id, line_item_id, note";
+
+const toAmount = (a: MonthlyAmount): MonthlyAmount => ({ ...a, amount: Number(a.amount) });
+const toOneOff = (o: OneOff): OneOff => ({ ...o, amount: Number(o.amount) });
 
 /** Amounts for months in [fromKey, toKeyExclusive) */
 export async function fetchAmounts(fromKey: string, toKeyExclusive: string): Promise<MonthlyAmount[]> {
@@ -149,16 +170,29 @@ export async function fetchAmounts(fromKey: string, toKeyExclusive: string): Pro
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabase
       .from("monthly_amounts")
-      .select("id, line_item_id, month, amount, note")
+      .select(AMOUNT_COLUMNS)
       .gte("month", fromKey)
       .lt("month", toKeyExclusive)
       .order("month")
       .range(from, from + pageSize - 1);
     if (error) throw error;
-    out.push(...(data as MonthlyAmount[]).map((a) => ({ ...a, amount: Number(a.amount) })));
+    out.push(...(data as MonthlyAmount[]).map(toAmount));
     if (data.length < pageSize) break;
   }
   return out;
+}
+
+/** One-offs for months in [fromKey, toKeyExclusive) */
+export async function fetchOneOffs(fromKey: string, toKeyExclusive: string): Promise<OneOff[]> {
+  const { data, error } = await supabase
+    .from("one_offs")
+    .select(ONE_OFF_COLUMNS)
+    .gte("month", fromKey)
+    .lt("month", toKeyExclusive)
+    .order("month")
+    .order("created_at");
+  if (error) throw error;
+  return (data as OneOff[]).map(toOneOff);
 }
 
 /** Insert or update a single cell. amount null deletes it (back to "not entered"). */
@@ -171,10 +205,23 @@ export async function saveAmount(lineItemId: string, month: string, amount: numb
   const { data, error } = await supabase
     .from("monthly_amounts")
     .upsert({ line_item_id: lineItemId, month, amount }, { onConflict: "line_item_id,month" })
-    .select("id, line_item_id, month, amount, note")
+    .select(AMOUNT_COLUMNS)
     .single();
   if (error) throw error;
-  return { ...(data as MonthlyAmount), amount: Number(data.amount) };
+  return toAmount(data as MonthlyAmount);
+}
+
+/** Set or clear the note on an entered cell. */
+export async function saveNote(lineItemId: string, month: string, note: string | null): Promise<MonthlyAmount> {
+  const { data, error } = await supabase
+    .from("monthly_amounts")
+    .update({ note: note?.trim() || null })
+    .eq("line_item_id", lineItemId)
+    .eq("month", month)
+    .select(AMOUNT_COLUMNS)
+    .single();
+  if (error) throw error;
+  return toAmount(data as MonthlyAmount);
 }
 
 export async function saveAmountsBulk(rows: { line_item_id: string; month: string; amount: number }[]): Promise<MonthlyAmount[]> {
@@ -184,16 +231,33 @@ export async function saveAmountsBulk(rows: { line_item_id: string; month: strin
     const { data, error } = await supabase
       .from("monthly_amounts")
       .upsert(rows.slice(i, i + 500), { onConflict: "line_item_id,month" })
-      .select("id, line_item_id, month, amount, note");
+      .select(AMOUNT_COLUMNS);
     if (error) throw error;
-    out.push(...(data as MonthlyAmount[]).map((a) => ({ ...a, amount: Number(a.amount) })));
+    out.push(...(data as MonthlyAmount[]).map(toAmount));
   }
   return out;
 }
 
+export type OneOffInput = Omit<OneOff, "id">;
+
+export async function saveOneOff(id: string | null, input: OneOffInput): Promise<OneOff> {
+  const row = { ...input, note: input.note?.trim() || null };
+  const query = id
+    ? supabase.from("one_offs").update(row).eq("id", id)
+    : supabase.from("one_offs").insert(row);
+  const { data, error } = await query.select(ONE_OFF_COLUMNS).single();
+  if (error) throw error;
+  return toOneOff(data as OneOff);
+}
+
+export async function deleteOneOff(id: string): Promise<void> {
+  const { error } = await supabase.from("one_offs").delete().eq("id", id);
+  if (error) throw error;
+}
+
 // ---------- Rollups ----------
 
-/** lineItemId → monthKey → amount */
+/** lineItemId → monthKey → amount (typed cell values only) */
 export type AmountIndex = Map<string, Map<string, number>>;
 
 export function indexAmounts(amounts: MonthlyAmount[]): AmountIndex {
@@ -206,6 +270,110 @@ export function indexAmounts(amounts: MonthlyAmount[]): AmountIndex {
   return idx;
 }
 
+type MonthBuckets<T> = Map<string, Map<string, T[]>>;
+
+function bucket<T>(map: MonthBuckets<T>, key: string, month: string, value: T) {
+  let m = map.get(key);
+  if (!m) map.set(key, (m = new Map()));
+  const list = m.get(month);
+  if (list) list.push(value);
+  else m.set(month, [value]);
+}
+
+/**
+ * Everything needed to total a month: typed cells plus one-offs.
+ * One-offs tied to a line item add to that item; tied only to a category they form
+ * that category's "One-offs" row; untied ones are "Uncategorized" spending.
+ */
+export type Ledger = {
+  categories: Category[];
+  items: LineItem[];
+  /** Typed cell values (base amounts) */
+  idx: AmountIndex;
+  /** lineItemId → month → note */
+  notes: Map<string, Map<string, string>>;
+  oneOffs: OneOff[];
+  oneOffsByItem: MonthBuckets<OneOff>;
+  /** Category-only one-offs (no line item) */
+  oneOffsByCategory: MonthBuckets<OneOff>;
+  /** month → untied one-offs */
+  uncategorized: Map<string, OneOff[]>;
+  kindByCategory: Map<string, CategoryKind>;
+};
+
+export function buildLedger(
+  categories: Category[],
+  items: LineItem[],
+  amounts: MonthlyAmount[],
+  oneOffs: OneOff[]
+): Ledger {
+  const itemIds = new Set(items.map((i) => i.id));
+  const catIds = new Set(categories.map((c) => c.id));
+  const notes = new Map<string, Map<string, string>>();
+  for (const a of amounts) {
+    if (!a.note) continue;
+    let m = notes.get(a.line_item_id);
+    if (!m) notes.set(a.line_item_id, (m = new Map()));
+    m.set(a.month, a.note);
+  }
+  const oneOffsByItem: MonthBuckets<OneOff> = new Map();
+  const oneOffsByCategory: MonthBuckets<OneOff> = new Map();
+  const uncategorized = new Map<string, OneOff[]>();
+  for (const o of oneOffs) {
+    if (o.line_item_id && itemIds.has(o.line_item_id)) bucket(oneOffsByItem, o.line_item_id, o.month, o);
+    else if (o.category_id && catIds.has(o.category_id)) bucket(oneOffsByCategory, o.category_id, o.month, o);
+    else uncategorized.set(o.month, [...(uncategorized.get(o.month) ?? []), o]);
+  }
+  return {
+    categories,
+    items,
+    idx: indexAmounts(amounts),
+    notes,
+    oneOffs,
+    oneOffsByItem,
+    oneOffsByCategory,
+    uncategorized,
+    kindByCategory: new Map(categories.map((c) => [c.id, c.kind])),
+  };
+}
+
+const sumOneOffs = (list: OneOff[] | undefined) => sumMoney((list ?? []).map((o) => o.amount));
+
+export function itemOneOffs(L: Ledger, itemId: string, month: string): OneOff[] {
+  return L.oneOffsByItem.get(itemId)?.get(month) ?? [];
+}
+
+export function categoryOneOffs(L: Ledger, categoryId: string, month: string): OneOff[] {
+  return L.oneOffsByCategory.get(categoryId)?.get(month) ?? [];
+}
+
+/** Typed amount + linked one-offs; undefined when neither exists. */
+export function itemMonthTotal(L: Ledger, itemId: string, month: string): number | undefined {
+  const base = L.idx.get(itemId)?.get(month);
+  const linked = L.oneOffsByItem.get(itemId)?.get(month);
+  if (base === undefined && !linked?.length) return undefined;
+  return sumMoney([base ?? 0, sumOneOffs(linked)]);
+}
+
+export function totalForCategoryMonth(L: Ledger, categoryId: string, month: string): number {
+  return sumMoney([
+    ...L.items.filter((i) => i.category_id === categoryId).map((i) => itemMonthTotal(L, i.id, month) ?? 0),
+    sumOneOffs(categoryOneOffs(L, categoryId, month)),
+  ]);
+}
+
+/** Whether a category has anything (typed or one-off) in a month */
+export function categoryHasData(L: Ledger, categoryId: string, month: string): boolean {
+  return (
+    L.items.some((i) => i.category_id === categoryId && itemMonthTotal(L, i.id, month) !== undefined) ||
+    categoryOneOffs(L, categoryId, month).length > 0
+  );
+}
+
+export function uncategorizedTotal(L: Ledger, month: string): number {
+  return sumOneOffs(L.uncategorized.get(month));
+}
+
 export type MonthSummary = {
   month: string;
   income: number;
@@ -213,34 +381,42 @@ export type MonthSummary = {
   savings: number;
   /** income − spending − savings: what's left over */
   net: number;
-  /** Count of entered cells this month */
+  /** Count of typed cells this month (for "x of y entered") */
   entered: number;
+  /** Total of all one-offs this month */
+  oneOffs: number;
+  /** Anything at all recorded this month */
+  hasData: boolean;
 };
 
-export function summarizeMonth(
-  month: string,
-  categories: Category[],
-  items: LineItem[],
-  idx: AmountIndex
-): MonthSummary {
-  const kindByCat = new Map(categories.map((c) => [c.id, c.kind]));
+export function summarizeMonth(L: Ledger, month: string): MonthSummary {
   const totals: Record<CategoryKind, number[]> = { income: [], expense: [], savings: [] };
   let entered = 0;
-  for (const item of items) {
-    const v = idx.get(item.id)?.get(month);
-    if (v === undefined) continue;
-    entered++;
-    const kind = kindByCat.get(item.category_id);
-    if (kind) totals[kind].push(v);
+  for (const item of L.items) {
+    if (L.idx.get(item.id)?.has(month)) entered++;
+    const v = itemMonthTotal(L, item.id, month);
+    const kind = L.kindByCategory.get(item.category_id);
+    if (v !== undefined && kind) totals[kind].push(v);
   }
+  for (const [catId, byMonth] of L.oneOffsByCategory) {
+    const kind = L.kindByCategory.get(catId);
+    if (kind) totals[kind].push(sumOneOffs(byMonth.get(month)));
+  }
+  totals.expense.push(uncategorizedTotal(L, month));
+  const monthOneOffs = L.oneOffs.filter((o) => o.month === month);
   const income = sumMoney(totals.income);
   const spending = sumMoney(totals.expense);
   const savings = sumMoney(totals.savings);
-  return { month, income, spending, savings, net: sumMoney([income, -spending, -savings]), entered };
-}
-
-export function totalForCategoryMonth(categoryId: string, month: string, items: LineItem[], idx: AmountIndex): number {
-  return sumMoney(items.filter((i) => i.category_id === categoryId).map((i) => idx.get(i.id)?.get(month) ?? 0));
+  return {
+    month,
+    income,
+    spending,
+    savings,
+    net: sumMoney([income, -spending, -savings]),
+    entered,
+    oneOffs: sumOneOffs(monthOneOffs),
+    hasData: entered > 0 || monthOneOffs.length > 0,
+  };
 }
 
 /** Average of the most recent `n` entered months before `month` (for anomaly hints). */
@@ -275,7 +451,7 @@ export function suggestedAmount(item: LineItem, month: string, idx: AmountIndex)
   return null;
 }
 
-/** Flag amounts far from the item's recent average. */
+/** Flag typed amounts far from the item's recent average (one-offs are excluded on purpose). */
 export function anomalyHint(item: LineItem, month: string, value: number, idx: AmountIndex): string | null {
   const avg = trailingAverage(item.id, month, idx);
   if (avg === null || avg < 20) return null;
@@ -283,6 +459,24 @@ export function anomalyHint(item: LineItem, month: string, value: number, idx: A
     return `Usually about ${formatMoney(avg)}`;
   }
   return null;
+}
+
+/** Budget status for display: tone escalates at 90% and over 100%. */
+export function budgetStatus(spent: number, budget: number): { pct: number; tone: "ok" | "near" | "over"; label: string } {
+  const pct = budget > 0 ? spent / budget : spent > 0 ? Infinity : 0;
+  const tone = pct > 1 ? "over" : pct >= 0.9 ? "near" : "ok";
+  const diff = sumMoney([budget, -spent]);
+  const label = diff >= 0 ? `${formatMoney(diff)} left` : `${formatMoney(-diff)} over`;
+  return { pct, tone, label };
+}
+
+/** "Vacations › Plane fare", "Personal", or "Uncategorized" */
+export function oneOffTarget(o: OneOff, categories: Category[], items: LineItem[]): string {
+  const item = o.line_item_id ? items.find((i) => i.id === o.line_item_id) : undefined;
+  const cat = categories.find((c) => c.id === (item?.category_id ?? o.category_id));
+  if (item && cat) return `${cat.name} › ${item.name}`;
+  if (cat) return cat.name;
+  return "Uncategorized";
 }
 
 // ---------- Default structure (from the 2026 spreadsheet) ----------

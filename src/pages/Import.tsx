@@ -87,7 +87,8 @@ export function Import() {
             Upload the yearly budget workbook (.xlsx). Each section header row (e.g. <em>HOME | JAN | … | DEC</em>)
             becomes a category, each row a line item, and each filled cell a monthly amount. Totals rows are
             skipped and recalculated. Re-importing is safe: existing items are matched by name and amounts are
-            overwritten with the spreadsheet's values.
+            overwritten with the spreadsheet's values. (Don't re-import a Budgeto export into the same account:
+            its cells already include one-off purchases, which would then be counted twice.)
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
