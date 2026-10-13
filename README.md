@@ -9,7 +9,8 @@ Same stack as Tracko: Vite + React 19 + TypeScript, Tailwind v4 + shadcn/ui, Sup
 - **Categories** (Income, Home, Daily Living, …) have a type: income, spending or savings. 401k and HSA go under a savings category ("Financial Obligations"), so they're tracked, but not counted as spending.
 - **Line items** (Rent, Groceries, Jay Wage, …) are optional rows within a category.
 - **Totals come from two sources only: card charges and manual entries.** There is no typed amount per cell.
-- **Manual entries** ("Rent $2,000", "Hotel $500") are named amounts you add to a category for one month, with **+ Add manual entry** in that category on the Month page (or by clicking a cell in the Year grid). Pick a line item to roll it into that line; otherwise it shows in the category's **Other** row. Mark one **Repeats monthly** (rent, wages, subscriptions) and next month's page offers **Repeat N from {last month}** to copy them in one click. (Stored in the `one_offs` table.)
+- **Manual entries** ("Rent $2,000", "Hotel $500") are named amounts you add to a category for one month, with **+ Add manual entry** in that category on the Month page (or by clicking a cell in the Year grid). Pick a line item to roll it into that line; otherwise it shows in the category's **Other** row. (Stored in the `one_offs` table.)
+- **Recurring entries** (rent, wages, subscriptions) are manual entries that fill themselves in every month, through the current month, until you stop them. Tick **Repeat every month** when adding an entry, or use **+ Add recurring entry** in the Month page's **Recurring** card. Editing one month asks whether the change is for *that month only*, *that month and later* (a raise; past months keep their amounts) or *every month*; deleting offers *skip this month*, *stop from here* or *delete every month*. The Recurring card lists them all with their amounts, lets you change, skip, stop or delete one, and restart stopped ones. (Table `recurring_entries`; each month is a `one_offs` row with `recurring_id`.)
 - **Amex charges**, imported monthly from the statement download. Each charge counts once, following the same rule as manual entries: filed under a line item (adds to that line), filed to a category with no specific line (shows in that category's Other row), unfiled (counts as uncategorized spending until filed), linked to a manual entry you already added (the manual entry counts instead), or "don't count" (card payments). Merchant choices are remembered, so later months mostly file themselves. See [`docs/AMEX_IMPORT.md`](docs/AMEX_IMPORT.md).
 - **Budgets** (optional): a monthly target on any category or line item, shown as budget vs actual.
 - **Notes**: any manual entry can carry a note (e.g. "AC ran all month").
@@ -20,7 +21,7 @@ Same stack as Tracko: Vite + React 19 + TypeScript, Tailwind v4 + shadcn/ui, Sup
 | Page | What it's for |
 |---|---|
 | **Dashboard** `/` | Month and year-to-date totals with changes, income vs spending by month, spending by category, where the money went, budget vs actual, largest one-time manual entries, biggest changes vs last month |
-| **Month** `/month/2026-10` | Each category lists its line items and Other row, with the manual entries (pencil) and Amex charges (card) that make up each total, plus **+ Add manual entry**. **Repeat N from …** copies last month's repeating entries. Banners for unfiled card charges. Budget bars per category. |
+| **Month** `/month/2026-10` | Each category lists its line items and Other row, with the manual entries (pencil) and Amex charges (card) that make up each total, plus **+ Add manual entry**. A **Recurring** card lists every recurring entry (amount, since/until) to change, skip, stop or restart. Banners for unfiled card charges. Budget bars per category. |
 | **Year** `/year/2026` | The spreadsheet view. Categories collapse to their totals and expand into line items and an Other row. Click any cell to see its manual entries and card charges or add one. Shows year total, average, budget and a trend sparkline. **Export .xlsx** downloads the year in the spreadsheet's layout. |
 | **Settings** `/settings` | Add, rename, reorder or archive categories and line items; set budgets |
 | **Import** `/settings/import` | One-time import of the `.xlsx` budget, with a preview of totals before saving |
@@ -38,6 +39,7 @@ The Supabase project is shared with Tracko and Resybot, so every Budgeto object 
    - `20261021000000_card_import.sql` (Amex import: imports, transactions, merchant rules)
    - `20261022000000_card_category.sql` (lets a card charge be filed to a category without a specific line item)
    - `20261023000000_manual_entries_only.sql` (turns every typed monthly amount into a manual entry on its line item and adds "repeats monthly"; totals come only from manual entries and card charges after this)
+   - `20261024000000_recurring_entries.sql` (recurring entries; turns entries marked "repeats monthly" into recurring entries)
 2. Go to **Project Settings → Data API → Exposed schemas** and add `budgeto`. Without this step, API calls fail with "schema must be one of the following".
 
 Run migrations from the SQL editor rather than `supabase db push`. The project's migration history also contains Tracko's migrations, which this repo doesn't have.
@@ -60,7 +62,7 @@ Import the repo in Vercel (framework preset: Vite) and set `VITE_SUPABASE_URL` a
 
 ### 5. Bring in the spreadsheet
 
-Sign in, go to **Settings → Import**, choose `2026_Budget.xlsx`, check the preview and click **Import**. Each filled cell becomes a manual entry on its line item (rows filled most months are marked as repeating). Re-importing is safe: items are matched by name and the entries an earlier import made are replaced.
+Sign in, go to **Settings → Import**, choose `2026_Budget.xlsx`, check the preview and click **Import**. Each filled cell becomes a manual entry on its line item (rows filled most months become recurring entries). Re-importing is safe: items are matched by name and the entries an earlier import made are replaced.
 
 ### 6. Each month: import the Amex statement
 

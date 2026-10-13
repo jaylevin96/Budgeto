@@ -33,7 +33,7 @@ export function OneOffList({
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-1.5 truncate font-medium">
                 {o.name}
-                {o.repeats && <Repeat className="h-3 w-3 shrink-0 text-[var(--color-muted-foreground)]" aria-label="Repeats monthly" />}
+                {o.recurring_id && <Repeat className="h-3 w-3 shrink-0 text-[var(--color-muted-foreground)]" aria-label="Repeats monthly" />}
               </span>
               {(showMonth || showTarget || o.note) && (
                 <span className="block truncate text-xs text-[var(--color-muted-foreground)]">

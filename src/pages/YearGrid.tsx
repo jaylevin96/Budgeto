@@ -75,7 +75,7 @@ export function YearGrid() {
   const year = /^\d{4}$/.test(params.year ?? "") ? Number(params.year) : thisYear;
   const months = Array.from({ length: 12 }, (_, m) => monthKey(year, m));
 
-  const { categories, items, oneOffs, ledger, loading, error, reload, applyOneOff, applyTransactions, applyCreated } = useBudget(
+  const { categories, items, oneOffs, recurring, ledger, loading, error, reload, refresh, applyOneOff, applyTransactions, applyCreated } = useBudget(
     monthKey(year, 0),
     monthKey(year + 1, 0)
   );
@@ -356,7 +356,12 @@ export function YearGrid() {
           defaults={editingOneOff}
           categories={categories}
           items={items}
+          recurring={recurring}
           onClose={() => setEditingOneOff(null)}
+          onRecurringChanged={() => {
+            setEditingOneOff(null);
+            refresh();
+          }}
           onSaved={(id, saved) => {
             setEditingOneOff(null);
             applyOneOff(id, saved);
