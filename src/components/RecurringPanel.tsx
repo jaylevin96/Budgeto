@@ -93,6 +93,10 @@ export function RecurringPanel({
     .map((kind) => ({ kind, lines: lines.filter((l) => l.kind === kind) }))
     .filter((g) => g.lines.length > 0)
     .map((g) => ({ ...g, total: sumMoney(g.lines.map((l) => l.amount)) }));
+  /** Income comes in (+, green); spending and savings go out (−) */
+  const signed = (kind: CategoryKind, n: number, cents = false) =>
+    n === 0 ? formatMoney(0, cents) : `${kind === "income" ? "+" : "−"}${formatMoney(Math.abs(n), cents)}`;
+  const tone = (kind: CategoryKind) => (kind === "income" ? "text-[var(--color-success)]" : "");
   const totalOf = (kind: CategoryKind) => groups.find((g) => g.kind === kind)?.total ?? 0;
   const net = sumMoney([totalOf("income"), -totalOf("expense"), -totalOf("savings")]);
 
@@ -106,6 +110,7 @@ export function RecurringPanel({
     }
   }
 
+  const kindOf = (r: RecurringEntry): CategoryKind => catById.get(r.category_id)?.kind ?? "expense";
   const row = (r: RecurringEntry, amount: number, notes: string[], muted = false) => (
     <li key={r.id}>
       <button
@@ -127,8 +132,13 @@ export function RecurringPanel({
             ))}
           </span>
         </span>
-        <span className={cn("font-medium tabular-nums", muted && "text-[var(--color-muted-foreground)] line-through")}>
-          {formatMoney(muted ? r.amount : amount, true)}
+        <span
+          className={cn(
+            "font-medium tabular-nums",
+            muted ? "text-[var(--color-muted-foreground)] line-through" : tone(kindOf(r))
+          )}
+        >
+          {signed(kindOf(r), muted ? r.amount : amount, true)}
         </span>
       </button>
     </li>
@@ -143,7 +153,7 @@ export function RecurringPanel({
           </h2>
           {lines.length > 0 && (
             <span className="text-xs text-[var(--color-muted-foreground)]">
-              {isFuture ? `Coming in on ${formatMonth(month, "short")}` : `Brought into ${formatMonth(month, "short")}`}
+              {isFuture ? `Scheduled for ${formatMonth(month, "short")}` : `Added to ${formatMonth(month, "short")}`}
             </span>
           )}
         </div>
@@ -152,13 +162,21 @@ export function RecurringPanel({
             {groups.map((g) => (
               <div key={g.kind} className="flex items-baseline gap-1.5">
                 <dt className="text-[var(--color-muted-foreground)]">{KIND_LABEL[g.kind]}</dt>
-                <dd className="font-medium tabular-nums">{formatMoney(g.total)}</dd>
+                <dd className={cn("font-medium tabular-nums", tone(g.kind))}>{signed(g.kind, g.total)}</dd>
               </div>
             ))}
             {groups.length > 1 && (
               <div className="flex items-baseline gap-1.5">
-                <dt className="text-[var(--color-muted-foreground)]">Left over</dt>
-                <dd className={cn("font-semibold tabular-nums", net < 0 && "text-[var(--color-destructive)]")}>{formatMoney(net)}</dd>
+                <dt className="text-[var(--color-muted-foreground)]">Net</dt>
+                <dd
+                  className={cn(
+                    "font-semibold tabular-nums",
+                    net < 0 ? "text-[var(--color-destructive)]" : net > 0 && "text-[var(--color-success)]"
+                  )}
+                >
+                  {net > 0 ? "+" : net < 0 ? "−" : ""}
+                  {formatMoney(Math.abs(net))}
+                </dd>
               </div>
             )}
           </dl>
@@ -173,9 +191,9 @@ export function RecurringPanel({
         <div key={g.kind} className="border-b border-[var(--color-border)] last:border-b-0">
           <div className="flex items-baseline justify-between bg-[var(--color-muted)]/50 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">
             <span>
-              {KIND_LABEL[g.kind]} ({g.lines.length})
+              {g.kind === "income" ? "Coming in" : g.kind === "savings" ? "Going to savings" : "Going out"} · {KIND_LABEL[g.kind]} ({g.lines.length})
             </span>
-            <span className="tabular-nums">{formatMoney(g.total, true)}</span>
+            <span className={cn("tabular-nums", tone(g.kind))}>{signed(g.kind, g.total, true)}</span>
           </div>
           <ul className="divide-y divide-[var(--color-border)]">
             {[...g.lines].sort((a, b) => b.amount - a.amount).map((l) => row(l.r, l.amount, l.notes, l.skipped))}
