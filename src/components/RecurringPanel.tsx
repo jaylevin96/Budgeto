@@ -21,6 +21,7 @@ import {
   type OneOff,
 } from "@/lib/budget";
 import {
+  activeIn,
   needingAmount,
   removeRecurring,
   restartRecurring,
@@ -31,6 +32,7 @@ import {
   type RecurringEntry,
 } from "@/lib/recurring";
 import { cn } from "@/lib/utils";
+import { VaryingAmountForm } from "@/components/VaryingAmountForm";
 
 /**
  * The Month page's "Recurring" card: a breakdown of what recurring entries bring into this
@@ -47,6 +49,7 @@ export function RecurringPanel({
   items,
   onAdd,
   onChanged,
+  onAmountSaved,
 }: {
   month: string;
   recurring: RecurringEntry[];
@@ -56,6 +59,7 @@ export function RecurringPanel({
   items: LineItem[];
   onAdd: () => void;
   onChanged: () => void;
+  onAmountSaved: (id: string, saved: OneOff | null) => void;
 }) {
   const [editing, setEditing] = useState<RecurringEntry | null>(null);
   const [showStopped, setShowStopped] = useState(false);
@@ -84,7 +88,8 @@ export function RecurringPanel({
     const occ = occurrence(r, month);
     // Past and current months have a real entry; future months show what will come in
     // (a varying amount isn't known yet, so it isn't counted)
-    const estimate = isFuture && r.amount_varies && !skipped;
+    // A future month's varying amount isn't known unless it was entered ahead of time
+    const estimate = isFuture && r.amount_varies && !skipped && !occ;
     const amount = skipped || estimate || pending ? 0 : (occ?.amount ?? (isFuture ? r.amount : 0));
     const prev = occurrence(r, prevMonth)?.amount;
     const notes: string[] = [];
@@ -291,6 +296,7 @@ export function RecurringPanel({
         <RecurringDialog
           entry={editing}
           month={month}
+          oneOffs={oneOffs}
           categories={categories}
           items={items}
           onClose={() => setEditing(null)}
@@ -298,27 +304,40 @@ export function RecurringPanel({
             setEditing(null);
             onChanged();
           }}
+          onAmountSaved={(id, saved) => {
+            setEditing(null);
+            onAmountSaved(id, saved);
+          }}
         />
       )}
     </Card>
   );
 }
 
-/** Change, skip, stop or delete a recurring entry, as of the month being viewed. */
-function RecurringDialog({
+/**
+ * One modal per recurring entry, as of the month being viewed. When its amount changes each
+ * month, it opens on that month's amount; the entry's settings (name, category, stop, skip,
+ * delete) are below. Otherwise it opens on the settings.
+ */
+export function RecurringDialog({
   entry,
   month,
+  oneOffs,
   categories,
   items,
   onClose,
   onChanged,
+  onAmountSaved,
 }: {
   entry: RecurringEntry;
   month: string;
+  oneOffs: OneOff[];
   categories: Category[];
   items: LineItem[];
   onClose: () => void;
   onChanged: () => void;
+  /** A varying entry's amount for `month` was entered, changed (`saved`) or cleared (null) */
+  onAmountSaved: (id: string, saved: OneOff | null) => void;
 }) {
   const [name, setName] = useState(entry.name);
   const [amountText, setAmountText] = useState(String(entry.amount));
@@ -337,6 +356,8 @@ function RecurringDialog({
   const isCurrentOrPast = from <= currentMonthKey();
   const skipped = entry.skip_months.includes(month);
   const categoryItems = items.filter((i) => i.category_id === categoryId && (!i.archived || i.id === lineItemId));
+  // A varying amount for a month this entry covers: the modal is about entering it
+  const entersAmount = entry.amount_varies && activeIn(entry, month);
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -373,13 +394,32 @@ function RecurringDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Repeat className="h-4 w-4" aria-hidden /> {entry.name}
+            {entersAmount && <span className="font-normal text-[var(--color-muted-foreground)]">· {formatMonth(month)}</span>}
           </DialogTitle>
           <DialogDescription>
-            Every month since {formatMonth(entry.start_month, "short")}
-            {entry.end_month ? ` until ${formatMonth(entry.end_month, "short")}` : ", until you stop it"}. Months up to now are
-            already filled in; edit one month on its own from its category.
+            Recurring every month since {formatMonth(entry.start_month, "short")}
+            {entry.end_month ? ` until ${formatMonth(entry.end_month, "short")}` : ", until you stop it"}
+            {entry.amount_varies ? "; the amount changes each month." : `, ${formatMoney(entry.amount, true)} each month.`}
           </DialogDescription>
         </DialogHeader>
+        {entersAmount && (
+          <VaryingAmountForm
+            recurring={entry}
+            month={month}
+            oneOffs={oneOffs}
+            onSaved={onAmountSaved}
+            onSkipped={onChanged}
+          />
+        )}
+        <details open={!entersAmount} className="group space-y-4 [&[open]>summary]:mb-4">
+          <summary
+            className={cn(
+              "cursor-pointer text-sm font-medium text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]",
+              !entersAmount && "hidden"
+            )}
+          >
+            Change this recurring entry (name, category, stop or delete)
+          </summary>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className={cn("grid gap-4", !varies && "sm:grid-cols-[1fr_9rem]")}>
             <div className="space-y-2">
@@ -500,6 +540,7 @@ function RecurringDialog({
             </Button>
           </div>
         </div>
+        </details>
       </DialogContent>
     </Dialog>
   );
