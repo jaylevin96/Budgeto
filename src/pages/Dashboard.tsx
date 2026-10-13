@@ -15,7 +15,7 @@ import {
   YAxis,
   type TooltipProps,
 } from "recharts";
-import { ArrowRight, PencilLine, ShoppingBag } from "lucide-react";
+import { ArrowRight, PencilLine, ShoppingBag, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
@@ -45,7 +45,6 @@ import {
   type OneOff,
   type MonthSummary,
 } from "@/lib/budget";
-import { cn } from "@/lib/utils";
 
 const MAX_CATEGORY_SERIES = 7; // 8th slot is "Other"
 
@@ -60,8 +59,6 @@ export function Dashboard() {
     monthKey(year - 1, 0),
     monthKey(year + 1, 0)
   );
-  const [breakdownScope, setBreakdownScope] = useState<"month" | "year">("month");
-  const [budgetScope, setBudgetScope] = useState<"month" | "year">("month");
   const [editingOneOff, setEditingOneOff] = useState<OneOff | null>(null);
 
   const months = Array.from({ length: 12 }, (_, m) => monthKey(year, m));
@@ -69,24 +66,28 @@ export function Dashboard() {
   const lastWithData = [...summaries].reverse().find((s) => s.hasData)?.month ?? null;
   const shownMonths = lastWithData ? months.filter((m) => m <= lastWithData) : months;
 
+  // With ?month= the dashboard focuses that month; without it, it shows the year so far
   const monthParam = searchParams.get("month");
-  const defaultMonth =
-    lastWithData ?? (parseMonthKey(thisMonth).year === year ? thisMonth : monthKey(year, 11));
-  const selectedMonth =
+  const focusMonth =
     monthParam && /^\d{1,2}$/.test(monthParam) && +monthParam >= 1 && +monthParam <= 12
       ? monthKey(year, +monthParam - 1)
-      : defaultMonth;
-  const selectedIdx = parseMonthKey(selectedMonth).month;
+      : null;
+  // The month "Enter" and "Biggest changes" use when no month is focused
+  const refMonth = focusMonth ?? lastWithData ?? (thisYear === year ? thisMonth : monthKey(year, 11));
+  const refIdx = parseMonthKey(refMonth).month;
+  const periodMonths = focusMonth ? [focusMonth] : shownMonths;
+  const lastShownIdx = shownMonths.length - 1;
+  const periodLabel = focusMonth ? formatMonth(focusMonth) : `Jan–${MONTH_SHORT[lastShownIdx]} ${year}`;
+  const periodLink = focusMonth ? `/month/${monthSlug(focusMonth)}` : `/year/${year}`;
 
-  const current = summaries[selectedIdx];
-  const previous = summarizeMonth(ledger, addMonths(selectedMonth, -1));
-
-  // Year to date through the selected month, vs the same months last year
-  const ytd = sumSummaries(summaries.slice(0, selectedIdx + 1));
-  const lastYearSummaries = Array.from({ length: selectedIdx + 1 }, (_, m) =>
-    summarizeMonth(ledger, monthKey(year - 1, m))
-  );
-  const lastYtd = lastYearSummaries.some((s) => s.hasData) ? sumSummaries(lastYearSummaries) : null;
+  const current = focusMonth ? summaries[refIdx] : sumSummaries(summaries.slice(0, lastShownIdx + 1));
+  // A month compares with the month before; the year so far with the same months last year
+  const lastYearSummaries = shownMonths.map((_, m) => summarizeMonth(ledger, monthKey(year - 1, m)));
+  const previous = focusMonth
+    ? summarizeMonth(ledger, addMonths(focusMonth, -1))
+    : lastYearSummaries.some((s) => s.hasData)
+      ? sumSummaries(lastYearSummaries)
+      : null;
 
   // Spending groups: expense categories plus uncategorized entries and unfiled card charges
   const spendGroups: SpendGroup[] = [
@@ -125,18 +126,17 @@ export function Dashboard() {
     return row;
   });
 
-  const breakdownMonths = breakdownScope === "month" ? [selectedMonth] : months.slice(0, selectedIdx + 1);
   const breakdown = spendGroups
-    .map((g) => ({ name: g.name, total: sumMoney(breakdownMonths.map(g.total)) }))
+    .map((g) => ({ name: g.name, total: sumMoney(periodMonths.map(g.total)) }))
     .filter((c) => c.total > 0)
     .sort((a, b) => b.total - a.total);
 
   // Biggest line-item moves vs the previous month
-  const prevMonth = addMonths(selectedMonth, -1);
+  const prevMonth = addMonths(refMonth, -1);
   const changes = items
     .filter((i) => ledger.kindByCategory.get(i.category_id) === "expense")
     .map((i) => {
-      const now = itemMonthTotal(ledger, i.id, selectedMonth);
+      const now = itemMonthTotal(ledger, i.id, refMonth);
       const before = itemMonthTotal(ledger, i.id, prevMonth);
       return { item: i, now: now ?? 0, before: before ?? 0, delta: (now ?? 0) - (before ?? 0), known: now !== undefined };
     })
@@ -145,15 +145,16 @@ export function Dashboard() {
     .slice(0, 6);
 
   // Budget vs actual for categories that have a monthly budget
-  const budgetMonths = budgetScope === "month" ? [selectedMonth] : months.slice(0, selectedIdx + 1);
   const budgetRows = categories
     .filter((c) => c.monthly_budget != null && c.kind !== "income" && !c.archived)
     .map((c) => ({
       cat: c,
-      budget: sumMoney(budgetMonths.map(() => c.monthly_budget!)),
-      spent: sumMoney(budgetMonths.map((m) => totalForCategoryMonth(ledger, c.id, m))),
+      budget: sumMoney(periodMonths.map(() => c.monthly_budget!)),
+      spent: sumMoney(periodMonths.map((m) => totalForCategoryMonth(ledger, c.id, m))),
     }));
   const budgetRemaining = sumMoney([...budgetRows.map((r) => r.budget), ...budgetRows.map((r) => -r.spent)]);
+
+  const activeItemCount = items.filter((i) => !i.archived).length;
 
   const bigPurchases = oneOffs
     .filter((o) => o.month.startsWith(`${year}-`))
@@ -168,12 +169,19 @@ export function Dashboard() {
     const { year: y, month: m } = parseMonthKey(key);
     setSearchParams({ year: String(y), month: String(m + 1) }, { preventScrollReset: true });
   }
-  // Clicking anywhere in a month's column focuses that month
+  function clearMonth() {
+    setSearchParams({ year: String(year) }, { preventScrollReset: true });
+  }
+  // Clicking a month focuses it; clicking the focused month again goes back to the whole year
+  function toggleMonth(m: string) {
+    if (m === focusMonth) clearMonth();
+    else selectMonth(m);
+  }
   function onChartClick(state: { activeTooltipIndex?: number } | null) {
     const m = state?.activeTooltipIndex != null ? shownMonths[state.activeTooltipIndex] : undefined;
-    if (m) selectMonth(m);
+    if (m) toggleMonth(m);
   }
-  const dim = (m: string) => (m === selectedMonth ? 1 : 0.35);
+  const dim = (m: string) => (!focusMonth || m === focusMonth ? 1 : 0.35);
   const monthCells = shownMonths.map((m) => <Cell key={m} fillOpacity={dim(m)} />);
   const monthTick = (props: { x: number; y: number; payload: { value: string; index: number } }) => {
     const m = shownMonths[props.payload.index];
@@ -184,10 +192,10 @@ export function Dashboard() {
         dy={12}
         textAnchor="middle"
         fontSize={12}
-        fill={m === selectedMonth ? colors.tooltipText : colors.axis}
-        fontWeight={m === selectedMonth ? 700 : 400}
+        fill={m === focusMonth ? colors.tooltipText : colors.axis}
+        fontWeight={m === focusMonth ? 700 : 400}
         className="cursor-pointer"
-        onClick={() => m && selectMonth(m)}
+        onClick={() => m && toggleMonth(m)}
       >
         {props.payload.value}
       </text>
@@ -199,24 +207,35 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <StepperNav
-          label={
-            <>
-              {year} <span className="text-[var(--color-muted-foreground)]">· {MONTH_SHORT[selectedIdx]}</span>
-            </>
-          }
-          onPrev={() => setYear(year - 1)}
-          onNext={() => setYear(year + 1)}
-          prevLabel="Previous year"
-          nextLabel="Next year"
-          picker={{ mode: "month", value: selectedMonth, onSelect: selectMonth }}
-          onToday={selectedMonth !== thisMonth ? () => selectMonth(thisMonth) : undefined}
-          todayLabel="This month"
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <StepperNav
+            label={
+              focusMonth ? (
+                <>
+                  {year} <span className="text-[var(--color-muted-foreground)]">· {MONTH_SHORT[refIdx]}</span>
+                </>
+              ) : (
+                String(year)
+              )
+            }
+            onPrev={() => setYear(year - 1)}
+            onNext={() => setYear(year + 1)}
+            prevLabel="Previous year"
+            nextLabel="Next year"
+            picker={{ mode: "month", value: refMonth, onSelect: selectMonth }}
+            onToday={focusMonth !== thisMonth ? () => selectMonth(thisMonth) : undefined}
+            todayLabel="This month"
+          />
+          {focusMonth && (
+            <Button variant="secondary" size="sm" className="h-8 px-3" onClick={clearMonth}>
+              <X /> Whole year
+            </Button>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <Button asChild size="sm">
-            <Link to={`/month/${monthSlug(selectedMonth)}`}>
-              <PencilLine /> Enter {MONTH_SHORT[selectedIdx]}
+            <Link to={`/month/${monthSlug(refMonth)}`}>
+              <PencilLine /> Enter {MONTH_SHORT[refIdx]}
             </Link>
           </Button>
         </div>
@@ -231,39 +250,33 @@ export function Dashboard() {
           <section className="space-y-3">
             <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted-foreground)]">
               <Link
-                to={`/month/${monthSlug(selectedMonth)}`}
+                to={periodLink}
                 className="inline-flex items-center gap-1 hover:text-[var(--color-foreground)] hover:underline"
               >
-                {formatMonth(selectedMonth)} <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                {focusMonth ? formatMonth(focusMonth) : `${year}${year === thisYear ? " so far" : ""} (Jan–${MONTH_SHORT[lastShownIdx]})`}{" "}
+                <ArrowRight className="h-3.5 w-3.5" aria-hidden />
               </Link>
             </h2>
-            <SummaryTiles current={current} previous={previous} compareLabel="vs last month" colors={colors} />
-            {current.entered < items.filter((i) => !i.archived).length && current.entered > 0 && (
+            <SummaryTiles
+              current={current}
+              previous={previous}
+              compareLabel={focusMonth ? "vs last month" : `vs same period ${year - 1}`}
+              colors={colors}
+            />
+            {focusMonth && summaries[refIdx].entered < activeItemCount && summaries[refIdx].entered > 0 && (
               <p className="text-xs text-[var(--color-muted-foreground)]">
-                {current.entered} of {items.filter((i) => !i.archived).length} items entered for this month.{" "}
-                <Link className="underline" to={`/month/${monthSlug(selectedMonth)}`}>
+                {summaries[refIdx].entered} of {activeItemCount} items entered for this month.{" "}
+                <Link className="underline" to={periodLink}>
                   Finish entering
                 </Link>
               </p>
             )}
           </section>
 
-          <section className="space-y-3">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted-foreground)]">
-              Year to date (Jan–{MONTH_SHORT[selectedIdx]} {year})
-            </h2>
-            <SummaryTiles
-              current={ytd}
-              previous={lastYtd}
-              compareLabel={`vs same period ${year - 1}`}
-              colors={colors}
-            />
-          </section>
-
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg">Income vs spending by month</CardTitle>
-              <CardDescription>"Left over" is income minus spending and savings. Click a month to focus it.</CardDescription>
+              <CardDescription>"Left over" is income minus spending and savings. {focusMonth ? "Click it again to see the whole year." : "Click a month to focus it."}</CardDescription>
             </CardHeader>
             <CardContent className="h-80 px-2 sm:px-6">
               <ResponsiveContainer width="100%" height="100%">
@@ -304,7 +317,7 @@ export function Dashboard() {
                         key={p.index}
                         cx={p.cx}
                         cy={p.cy}
-                        r={shownMonths[p.index] === selectedMonth ? 5 : 4}
+                        r={shownMonths[p.index] === focusMonth ? 5 : 4}
                         fill={colors.neutral}
                         fillOpacity={dim(shownMonths[p.index])}
                         stroke={colors.surface}
@@ -322,7 +335,7 @@ export function Dashboard() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg">Spending by category</CardTitle>
-                <CardDescription>Monthly spending, stacked by category (excludes savings). Click a month to focus it.</CardDescription>
+                <CardDescription>Monthly spending, stacked by category (excludes savings). {focusMonth ? "Click it again to see the whole year." : "Click a month to focus it."}</CardDescription>
               </CardHeader>
               <CardContent className="h-80 px-2 sm:px-6">
                 <ResponsiveContainer width="100%" height="100%">
@@ -371,11 +384,8 @@ export function Dashboard() {
               <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 pb-2">
                 <div className="space-y-1.5">
                   <CardTitle className="text-lg">Where the money went</CardTitle>
-                  <CardDescription>
-                    {breakdownScope === "month" ? formatMonth(selectedMonth) : `Jan–${MONTH_SHORT[selectedIdx]} ${year}`}
-                  </CardDescription>
+                  <CardDescription>{periodLabel}</CardDescription>
                 </div>
-                <ScopeToggle scope={breakdownScope} onChange={setBreakdownScope} />
               </CardHeader>
               <CardContent className="px-2 sm:px-6" style={{ height: Math.max(160, breakdown.length * 34 + 24) }}>
                 {breakdown.length === 0 ? (
@@ -415,11 +425,10 @@ export function Dashboard() {
                   <CardTitle className="text-lg">Budget vs actual</CardTitle>
                   <CardDescription>
                     {budgetRows.length
-                      ? `${budgetRemaining >= 0 ? `${formatMoney(budgetRemaining)} left` : `${formatMoney(-budgetRemaining)} over`} across budgeted categories`
+                      ? `${periodLabel}: ${budgetRemaining >= 0 ? `${formatMoney(budgetRemaining)} left` : `${formatMoney(-budgetRemaining)} over`} across budgeted categories`
                       : "Set monthly budgets on categories in Settings."}
                   </CardDescription>
                 </div>
-                <ScopeToggle scope={budgetScope} onChange={setBudgetScope} />
               </CardHeader>
               <CardContent className="space-y-4">
                 {budgetRows.length === 0 ? (
@@ -429,7 +438,7 @@ export function Dashboard() {
                 ) : (
                   budgetRows.map((r) => (
                     <div key={r.cat.id}>
-                      <Link to={`/month/${monthSlug(selectedMonth)}`} className="mb-1 block text-sm font-medium hover:underline">
+                      <Link to={periodLink} className="mb-1 block text-sm font-medium hover:underline">
                         {r.cat.name}
                       </Link>
                       <BudgetBar spent={r.spent} budget={r.budget} />
@@ -463,7 +472,9 @@ export function Dashboard() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Biggest changes vs {formatMonth(prevMonth, "short")}</CardTitle>
+              <CardTitle className="text-lg">
+                Biggest changes: {formatMonth(refMonth, "short")} vs {formatMonth(prevMonth, "short")}
+              </CardTitle>
               <CardDescription>Spending line items that moved the most this month.</CardDescription>
             </CardHeader>
             <CardContent>
@@ -473,7 +484,7 @@ export function Dashboard() {
                 <ul className="divide-y divide-[var(--color-border)]">
                   {changes.map((c) => (
                     <li key={c.item.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                      <Link to={`/month/${monthSlug(selectedMonth)}`} className="truncate hover:underline">
+                      <Link to={`/month/${monthSlug(refMonth)}`} className="truncate hover:underline">
                         {c.item.name}
                       </Link>
                       <span className="flex items-center gap-3 tabular-nums">
@@ -511,27 +522,6 @@ export function Dashboard() {
 }
 
 type SpendGroup = { id: string; name: string; total: (month: string) => number };
-
-function ScopeToggle({ scope, onChange }: { scope: "month" | "year"; onChange: (s: "month" | "year") => void }) {
-  return (
-    <div className="flex rounded-full bg-[var(--color-muted)] p-1 text-xs" role="group">
-      {(["month", "year"] as const).map((s) => (
-        <button
-          key={s}
-          type="button"
-          aria-pressed={scope === s}
-          onClick={() => onChange(s)}
-          className={cn(
-            "rounded-full px-3 py-1 font-semibold text-[var(--color-muted-foreground)]",
-            scope === s && "bg-[var(--color-card)] text-[var(--color-foreground)] shadow-sm"
-          )}
-        >
-          {s === "month" ? "Month" : "YTD"}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 /** Legend labels in text ink, not the series color; the swatch carries identity. */
 function legendText(colors: ChartColors) {
