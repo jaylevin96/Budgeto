@@ -397,8 +397,6 @@ export type MonthSummary = {
   savings: number;
   /** income − spending − savings: what's left over */
   net: number;
-  /** Line items with something this month (for "x of y entered") */
-  entered: number;
   /** Total of all manual entries this month */
   oneOffs: number;
   /** Anything at all recorded this month */
@@ -433,7 +431,6 @@ export function summarizeMonth(L: Ledger, month: string): MonthSummary {
     spending,
     savings,
     net: sumMoney([income, -spending, -savings]),
-    entered,
     oneOffs: sumOneOffs(monthOneOffs),
     hasData: entered > 0 || monthOneOffs.length > 0 || L.transactions.some((t) => t.month === month && countsOnItsOwn(t)),
   };

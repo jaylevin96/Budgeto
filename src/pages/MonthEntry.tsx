@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, ChevronDown, ChevronsDownUp, ChevronsUpDown, CreditCard, Plus, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
 import { BudgetBar } from "@/components/BudgetBar";
 import { CardActivity } from "@/components/CardActivity";
@@ -22,7 +22,6 @@ import {
   formatMoney,
   formatMonth,
   itemCard,
-  itemEntered,
   itemMonthTotal,
   itemOneOffs,
   KIND_LABEL,
@@ -73,7 +72,6 @@ export function MonthEntry() {
     applyTransactions,
     applyCreated,
   } = useBudget(addMonths(month, -1), addMonths(month, 1));
-  const [onlyMissing, setOnlyMissing] = useState(false);
   const [editingOneOff, setEditingOneOff] = useState<EditingOneOff>(null);
   // Which card charges the dialog shows (a snapshot, so a reassigned charge stays in view)
   const [cardDialog, setCardDialog] = useState<{ title: string; description: string; ids: Set<string> } | null>(null);
@@ -106,7 +104,6 @@ export function MonthEntry() {
     setCardDialog({ title, description, ids: new Set(card.map((t) => t.id)) });
 
   const go = (delta: number) => navigate(`/month/${monthSlug(addMonths(month, delta))}`);
-  const enteredCount = activeItems.filter((i) => itemEntered(ledger, i.id, month)).length;
   const allCollapsed = activeCategories.length > 0 && activeCategories.every((c) => collapsed.has(c.id));
 
   if (!loading && !error && categories.length === 0) return <EmptyBudget onSeeded={reload} />;
@@ -190,74 +187,32 @@ export function MonthEntry() {
             </aside>
 
             <section className="space-y-4 xl:col-start-1 xl:row-start-1" aria-label="Categories">
-              <Card>
-                <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-3 p-4">
-                  <div className="min-w-48 flex-1">
-                    <div className="mb-1 flex justify-between text-sm">
-                      <span className="font-medium">
-                        {enteredCount} of {activeItems.length} line items have something
-                      </span>
-                      <span className="text-[var(--color-muted-foreground)]">
-                        {activeItems.length ? Math.round((enteredCount / activeItems.length) * 100) : 0}%
-                      </span>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-[var(--color-muted)]">
-                      <div
-                        className="h-full rounded-full bg-[var(--color-success)] transition-all"
-                        style={{ width: `${activeItems.length ? (enteredCount / activeItems.length) * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="flex items-center gap-2 text-sm whitespace-nowrap">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4"
-                        checked={onlyMissing}
-                        onChange={(e) => setOnlyMissing(e.target.checked)}
-                      />
-                      Only show empty
-                    </label>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={onlyMissing}
-                      onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(activeCategories.map((c) => c.id)))}
-                    >
-                      {allCollapsed ? <ChevronsUpDown /> : <ChevronsDownUp />}
-                      {allCollapsed ? "Expand all" : "Collapse all"}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold text-[var(--color-muted-foreground)]">Categories</h2>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(activeCategories.map((c) => c.id)))}
+                >
+                  {allCollapsed ? <ChevronsUpDown /> : <ChevronsDownUp />}
+                  {allCollapsed ? "Expand all" : "Collapse all"}
+                </Button>
+              </div>
 
-              {activeCategories.map((cat) => {
-                const catItems = activeItems.filter((i) => i.category_id === cat.id);
-                const visible = onlyMissing ? catItems.filter((i) => !itemEntered(ledger, i.id, month)) : catItems;
-                if (onlyMissing && !visible.length) return null;
-                return (
-                  <CategoryCard
-                    key={cat.id}
-                    category={cat}
-                    lineItems={visible}
-                    month={month}
-                    ledger={ledger}
-                    showOther={!onlyMissing}
-                    // "Only show empty" is for filling gaps, so it opens everything it shows
-                    collapsed={!onlyMissing && collapsed.has(cat.id)}
-                    onToggle={() => toggleCategory(cat.id)}
-                    onAdd={() => setEditingOneOff({ oneOff: null, category_id: cat.id })}
-                    onEdit={(o) => setEditingOneOff({ oneOff: o })}
-                    onShowCard={showCard}
-                  />
-                );
-              })}
-
-              {onlyMissing && enteredCount === activeItems.length && (
-                <p className="py-8 text-center text-[var(--color-muted-foreground)]">
-                  Every line item has something for {formatMonth(month)}.
-                </p>
-              )}
+              {activeCategories.map((cat) => (
+                <CategoryCard
+                  key={cat.id}
+                  category={cat}
+                  lineItems={activeItems.filter((i) => i.category_id === cat.id)}
+                  month={month}
+                  ledger={ledger}
+                  collapsed={collapsed.has(cat.id)}
+                  onToggle={() => toggleCategory(cat.id)}
+                  onAdd={() => setEditingOneOff({ oneOff: null, category_id: cat.id })}
+                  onEdit={(o) => setEditingOneOff({ oneOff: o })}
+                  onShowCard={showCard}
+                />
+              ))}
             </section>
           </div>
         </>
@@ -306,7 +261,6 @@ function CategoryCard({
   lineItems,
   month,
   ledger,
-  showOther,
   collapsed,
   onToggle,
   onAdd,
@@ -317,7 +271,6 @@ function CategoryCard({
   lineItems: LineItem[];
   month: string;
   ledger: Ledger;
-  showOther: boolean;
   collapsed: boolean;
   onToggle: () => void;
   onAdd: () => void;
@@ -326,10 +279,9 @@ function CategoryCard({
 }) {
   const otherEntries = categoryOneOffs(ledger, category.id, month);
   const otherCard = categoryCard(ledger, category.id, month);
-  const hasOther = showOther && otherEntries.length + otherCard.length > 0;
+  const hasOther = otherEntries.length + otherCard.length > 0;
   const subtotal = totalForCategoryMonth(ledger, category.id, month);
   const otherTotal = sumMoney([...otherEntries, ...otherCard].map((x) => x.amount));
-  const filled = lineItems.filter((i) => itemEntered(ledger, i.id, month)).length;
   const bodyId = `category-${category.id}`;
 
   return (
@@ -349,10 +301,7 @@ function CategoryCard({
             />
             <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2">
               <span className="min-w-0 truncate font-semibold">{category.name}</span>
-              <span className="text-xs whitespace-nowrap text-[var(--color-muted-foreground)]">
-                {KIND_LABEL[category.kind]}
-                {collapsed && lineItems.length > 0 && ` · ${filled} of ${lineItems.length} filled`}
-              </span>
+              <span className="text-xs whitespace-nowrap text-[var(--color-muted-foreground)]">{KIND_LABEL[category.kind]}</span>
             </span>
             <span className="text-sm font-medium tabular-nums">{formatMoney(subtotal, true)}</span>
           </button>
@@ -396,13 +345,11 @@ function CategoryCard({
               />
             )}
           </ul>
-          {showOther && (
-            <div className={cn("px-2 py-1.5", lineItems.length + (hasOther ? 1 : 0) > 0 && "border-t border-[var(--color-border)]")}>
-              <Button variant="ghost" size="sm" className="text-[var(--color-primary)]" onClick={onAdd}>
-                <Plus /> Add manual entry
-              </Button>
-            </div>
-          )}
+          <div className={cn("px-2 py-1.5", lineItems.length + (hasOther ? 1 : 0) > 0 && "border-t border-[var(--color-border)]")}>
+            <Button variant="ghost" size="sm" className="text-[var(--color-primary)]" onClick={onAdd}>
+              <Plus /> Add manual entry
+            </Button>
+          </div>
         </div>
       )}
     </Card>

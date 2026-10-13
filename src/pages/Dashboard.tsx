@@ -180,8 +180,6 @@ export function Dashboard() {
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 8);
 
-  const activeItemCount = items.filter((i) => !i.archived).length;
-
   function setYear(y: number) {
     setSearchParams({ view: "year", year: String(y) });
   }
@@ -380,14 +378,6 @@ export function Dashboard() {
                 compareLabel={`vs ${formatMonth(prevMonth, "short")}`}
                 colors={colors}
               />
-              {monthSummary.entered < activeItemCount && monthSummary.entered > 0 && (
-                <p className="-mt-3 text-xs text-[var(--color-muted-foreground)]">
-                  {monthSummary.entered} of {activeItemCount} line items have something this month.{" "}
-                  <Link className="underline" to={monthLink}>
-                    Finish entering
-                  </Link>
-                </p>
-              )}
 
               <div className="grid gap-6 lg:grid-cols-2">
                 <BreakdownCard
