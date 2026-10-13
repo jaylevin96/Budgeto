@@ -141,13 +141,6 @@ export function MonthEntry() {
         <>
           <SummaryTiles current={summary} previous={prevSummary} compareLabel="vs last month" />
 
-          <p className="text-sm text-[var(--color-muted-foreground)]">
-            Totals come from <span className="font-medium text-[var(--color-foreground)]">card charges</span> (Import
-            Amex) and <span className="font-medium text-[var(--color-foreground)]">manual entries</span>: named amounts
-            you add to a category, like “Rent $2,000” or “Hotel $500”. Use{" "}
-            <span className="font-medium text-[var(--color-foreground)]">+ Add manual entry</span> in any category.
-          </p>
-
           <Card>
             <CardContent className="flex flex-wrap items-center gap-4 p-4">
               <div className="min-w-48 flex-1">
