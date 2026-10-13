@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { CalendarDays, LayoutDashboard, LogOut, Moon, Settings, Sheet, ShoppingBag, Sun } from "lucide-react";
+import { CalendarDays, LayoutDashboard, LogOut, Moon, Settings, Sheet, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BrandMark } from "@/components/BrandMark";
 import { supabase } from "@/lib/supabase";
@@ -22,7 +22,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { to: "/", label: "Dashboard", icon: LayoutDashboard, active: pathname === "/" },
     { to: `/month/${monthSlug(thisMonth)}`, label: "Month", icon: CalendarDays, active: pathname.startsWith("/month") },
     { to: `/year/${thisMonth.slice(0, 4)}`, label: "Year", icon: Sheet, active: pathname.startsWith("/year") },
-    { to: "/entries", label: "Entries", icon: ShoppingBag, active: pathname.startsWith("/entries") },
     { to: "/settings", label: "Settings", icon: Settings, active: pathname.startsWith("/settings") || pathname.startsWith("/import") },
   ];
 
@@ -90,7 +89,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         aria-label="Main"
         className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-border)] bg-[var(--color-card)]/95 pb-[env(safe-area-inset-bottom,0px)] backdrop-blur lg:hidden"
       >
-        <div className="mx-auto grid max-w-md grid-cols-5 px-2">
+        <div className="mx-auto grid max-w-md grid-cols-4 px-2">
           {links.map(({ to, label, icon: Icon, active }) => (
             <Link
               key={label}

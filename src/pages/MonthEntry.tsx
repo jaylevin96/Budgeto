@@ -1,28 +1,26 @@
-import { useCallback, useRef, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, Check, CheckCheck, CreditCard, MessageSquare, Plus, Settings2, ShoppingBag } from "lucide-react";
+import { AlertTriangle, CreditCard, Plus, Repeat, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
-import { AmountInput } from "@/components/AmountInput";
-import { useCellSaver } from "@/hooks/useCellSaver";
 import { BudgetBar } from "@/components/BudgetBar";
 import { CardActivity } from "@/components/CardActivity";
 import { CardTransactionsDialog } from "@/components/CardTransactions";
 import { EmptyBudget } from "@/components/EmptyBudget";
 import { OneOffDialog } from "@/components/OneOffDialog";
-import { OneOffList } from "@/components/OneOffList";
+import { CardChargesRow, OneOffList } from "@/components/OneOffList";
 import { StepperNav } from "@/components/StepperNav";
 import { SummaryTiles } from "@/components/SummaryTiles";
 import { useBudget } from "@/hooks/useBudget";
 import {
   addMonths,
-  anomalyHint,
   categoryCard,
   categoryOneOffs,
   currentMonthKey,
   formatMoney,
   formatMonth,
+  insertOneOffs,
   itemCard,
   itemEntered,
   itemMonthTotal,
@@ -30,28 +28,26 @@ import {
   KIND_LABEL,
   monthKeyFromSlug,
   monthSlug,
-  saveAmountsBulk,
-  saveNote,
-  suggestedAmount,
+  repeatingToCopy,
   summarizeMonth,
   sumMoney,
   totalForCategoryMonth,
+  type Category,
   type Ledger,
   type LineItem,
-  type MonthlyAmount,
   type OneOff,
 } from "@/lib/budget";
-import { formatDay, type Transaction } from "@/lib/transactions";
+import type { Transaction } from "@/lib/transactions";
 import { cn } from "@/lib/utils";
 
-type EditingOneOff = { oneOff: OneOff | null; category_id?: string | null; line_item_id?: string | null } | null;
+type EditingOneOff = { oneOff: OneOff | null; category_id?: string | null } | null;
 
 export function MonthEntry() {
   const params = useParams();
   const navigate = useNavigate();
   const month = monthKeyFromSlug(params.month) ?? currentMonthKey();
 
-  // Load the previous 12 months too, for suggestions and "usually about" hints
+  // Load last month too, for "vs last month" and repeating entries
   const {
     categories,
     items,
@@ -61,59 +57,51 @@ export function MonthEntry() {
     loading,
     error,
     reload,
-    applyAmount,
-    applyAmounts,
     applyOneOff,
+    applyOneOffs,
     applyTransactions,
     applyCreated,
-  } = useBudget(addMonths(month, -12), addMonths(month, 1));
+  } = useBudget(addMonths(month, -1), addMonths(month, 1));
   const [onlyMissing, setOnlyMissing] = useState(false);
-  const [filling, setFilling] = useState(false);
-  const [fillError, setFillError] = useState<string | null>(null);
+  const [copying, setCopying] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const [editingOneOff, setEditingOneOff] = useState<EditingOneOff>(null);
   // Which card charges the dialog shows (a snapshot, so a reassigned charge stays in view)
   const [cardDialog, setCardDialog] = useState<{ title: string; description: string; ids: Set<string> } | null>(null);
 
-  const idx = ledger.idx;
   const activeCategories = categories.filter((c) => !c.archived);
   const activeItems = items.filter((i) => !i.archived && activeCategories.some((c) => c.id === i.category_id));
   const summary = summarizeMonth(ledger, month);
   const prevSummary = summarizeMonth(ledger, addMonths(month, -1));
-  const monthOneOffs = oneOffs.filter((o) => o.month === month);
+  const needsCategory = ledger.uncategorized.get(month) ?? [];
+  const toCopy = repeatingToCopy(ledger, month);
 
-  // Items paid by card this month don't get a typed suggestion (it would count twice)
-  const pendingSuggestions = activeItems
-    .filter((i) => !itemEntered(ledger, i.id, month))
-    .map((i) => ({ item: i, amount: suggestedAmount(i, month, idx) }))
-    .filter((s): s is { item: LineItem; amount: number } => s.amount !== null);
-
-  async function fillSuggestions() {
-    setFilling(true);
-    setFillError(null);
+  async function copyRepeating() {
+    setCopying(true);
+    setCopyError(null);
     try {
-      const saved = await saveAmountsBulk(
-        pendingSuggestions.map((s) => ({ line_item_id: s.item.id, month, amount: s.amount }))
+      applyOneOffs(
+        await insertOneOffs(
+          toCopy.map((o) => ({
+            name: o.name,
+            amount: o.amount,
+            month,
+            category_id: o.category_id,
+            line_item_id: o.line_item_id,
+            note: o.note,
+            repeats: true,
+          }))
+        )
       );
-      applyAmounts(saved);
     } catch (err) {
-      setFillError(err instanceof Error ? err.message : "Could not save");
+      setCopyError(err instanceof Error ? err.message : "Could not save");
     } finally {
-      setFilling(false);
+      setCopying(false);
     }
   }
 
-  // Enter moves to the next amount field, like the spreadsheet
-  const listRef = useRef<HTMLDivElement>(null);
-  const focusNext = useCallback((from: HTMLInputElement) => {
-    const inputs = Array.from(listRef.current?.querySelectorAll<HTMLInputElement>("input[data-amount]") ?? []);
-    const i = inputs.indexOf(from);
-    if (i >= 0 && i + 1 < inputs.length) {
-      inputs[i + 1].focus();
-      inputs[i + 1].select();
-    } else {
-      from.blur();
-    }
-  }, []);
+  const showCard = (title: string, description: string, card: Transaction[]) =>
+    setCardDialog({ title, description, ids: new Set(card.map((t) => t.id)) });
 
   const go = (delta: number) => navigate(`/month/${monthSlug(addMonths(month, delta))}`);
   const enteredCount = activeItems.filter((i) => itemEntered(ledger, i.id, month)).length;
@@ -134,10 +122,7 @@ export function MonthEntry() {
           todayLabel="This month"
         />
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setEditingOneOff({ oneOff: null })}>
-            <Plus /> Entry
-          </Button>
-          <Button asChild variant="ghost" size="sm">
+          <Button asChild variant="outline" size="sm">
             <Link to="/import/card">
               <CreditCard /> Import Amex
             </Link>
@@ -156,12 +141,19 @@ export function MonthEntry() {
         <>
           <SummaryTiles current={summary} previous={prevSummary} compareLabel="vs last month" />
 
+          <p className="text-sm text-[var(--color-muted-foreground)]">
+            Totals come from <span className="font-medium text-[var(--color-foreground)]">card charges</span> (Import
+            Amex) and <span className="font-medium text-[var(--color-foreground)]">manual entries</span>: named amounts
+            you add to a category, like “Rent $2,000” or “Hotel $500”. Use{" "}
+            <span className="font-medium text-[var(--color-foreground)]">+ Add manual entry</span> in any category.
+          </p>
+
           <Card>
             <CardContent className="flex flex-wrap items-center gap-4 p-4">
               <div className="min-w-48 flex-1">
                 <div className="mb-1 flex justify-between text-sm">
                   <span className="font-medium">
-                    {enteredCount} of {activeItems.length} items entered
+                    {enteredCount} of {activeItems.length} line items have something
                   </span>
                   <span className="text-[var(--color-muted-foreground)]">
                     {activeItems.length ? Math.round((enteredCount / activeItems.length) * 100) : 0}%
@@ -181,17 +173,17 @@ export function MonthEntry() {
                   checked={onlyMissing}
                   onChange={(e) => setOnlyMissing(e.target.checked)}
                 />
-                Only show missing
+                Only show empty
               </label>
-              {pendingSuggestions.length > 0 && (
-                <Button size="sm" onClick={fillSuggestions} disabled={filling}>
-                  <CheckCheck />
-                  {filling
+              {toCopy.length > 0 && (
+                <Button size="sm" onClick={copyRepeating} disabled={copying}>
+                  <Repeat />
+                  {copying
                     ? "Saving…"
-                    : `Fill ${pendingSuggestions.length} recurring (${formatMoney(sumMoney(pendingSuggestions.map((s) => s.amount)))})`}
+                    : `Repeat ${toCopy.length} from ${formatMonth(addMonths(month, -1), "short")} (${formatMoney(sumMoney(toCopy.map((o) => o.amount)))})`}
                 </Button>
               )}
-              {fillError && <FormError>{fillError}</FormError>}
+              {copyError && <FormError>{copyError}</FormError>}
             </CardContent>
           </Card>
 
@@ -201,136 +193,56 @@ export function MonthEntry() {
             categories={categories}
             items={items}
             oneOffs={oneOffs}
-            onOpenCharges={(title, description, charges) =>
-              setCardDialog({ title, description, ids: new Set(charges.map((t) => t.id)) })
-            }
+            onOpenCharges={(title, description, charges) => showCard(title, description, charges)}
           />
+
+          {needsCategory.length > 0 && (
+            <Card className="border-[var(--color-warning)]">
+              <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-4 py-3 text-sm">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-[var(--color-warning)]" aria-hidden />
+                <span>
+                  {needsCategory.length === 1 ? "This manual entry needs" : "These manual entries need"} a category.
+                  Click to pick one.
+                </span>
+              </div>
+              <OneOffList
+                oneOffs={needsCategory}
+                categories={categories}
+                items={items}
+                showTarget={false}
+                onEdit={(o) => setEditingOneOff({ oneOff: o })}
+              />
+            </Card>
+          )}
         </>
       )}
 
       {loading ? (
         <p className="text-[var(--color-muted-foreground)]">Loading…</p>
       ) : (
-        <div ref={listRef} className="space-y-4">
+        <div className="space-y-4">
           {activeCategories.map((cat) => {
             const catItems = activeItems.filter((i) => i.category_id === cat.id);
             const visible = onlyMissing ? catItems.filter((i) => !itemEntered(ledger, i.id, month)) : catItems;
-            const catOneOffs = categoryOneOffs(ledger, cat.id, month);
-            const catCard = categoryCard(ledger, cat.id, month);
             if (onlyMissing && !visible.length) return null;
-            const subtotal = totalForCategoryMonth(ledger, cat.id, month);
             return (
-              <Card key={cat.id}>
-                <div className="space-y-2 border-b border-[var(--color-border)] px-4 py-3">
-                  <div className="flex items-baseline justify-between">
-                    <h2 className="font-semibold">
-                      {cat.name}
-                      <span className="ml-2 text-xs font-normal text-[var(--color-muted-foreground)]">
-                        {KIND_LABEL[cat.kind]}
-                      </span>
-                    </h2>
-                    <span className="text-sm font-medium tabular-nums">{formatMoney(subtotal, true)}</span>
-                  </div>
-                  {cat.monthly_budget != null && cat.kind !== "income" && (
-                    <BudgetBar spent={subtotal} budget={cat.monthly_budget} />
-                  )}
-                </div>
-                <ul className="divide-y divide-[var(--color-border)] empty:hidden">
-                  {visible.map((item) => (
-                    <AmountRow
-                      key={`${item.id}|${month}`}
-                      item={item}
-                      month={month}
-                      ledger={ledger}
-                      onSaved={(saved) => applyAmount(item.id, month, saved)}
-                      onEnter={focusNext}
-                      onEditOneOff={(o) => setEditingOneOff({ oneOff: o })}
-                      onShowCard={(card) =>
-                        setCardDialog({
-                          title: `${item.name} · ${formatMonth(month)}`,
-                          description: "Card charges included in this line. Move any that belong elsewhere.",
-                          ids: new Set(card.map((t) => t.id)),
-                        })
-                      }
-                    />
-                  ))}
-                </ul>
-                {catOneOffs.length + catCard.length > 0 && !onlyMissing && (
-                  <div className="border-t border-[var(--color-border)]">
-                    <p className="px-4 pt-2 text-xs font-medium text-[var(--color-muted-foreground)]">Entries</p>
-                    <OneOffList
-                      oneOffs={catOneOffs}
-                      categories={categories}
-                      items={items}
-                      showTarget={false}
-                      onEdit={(o) => setEditingOneOff({ oneOff: o })}
-                    />
-                    {catCard.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setCardDialog({
-                            title: `${cat.name} · ${formatMonth(month)}`,
-                            description: "Card charges filed to this category without a specific line. Move any that belong elsewhere.",
-                            ids: new Set(catCard.map((t) => t.id)),
-                          })
-                        }
-                        className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--color-accent)]"
-                      >
-                        <CreditCard className="h-4 w-4 shrink-0 text-[var(--color-muted-foreground)]" aria-hidden />
-                        <span className="min-w-0 flex-1 truncate font-medium">
-                          Amex ({catCard.length} {catCard.length === 1 ? "charge" : "charges"})
-                        </span>
-                        <span className="font-medium tabular-nums">{formatMoney(sumMoney(catCard.map((t) => t.amount)), true)}</span>
-                      </button>
-                    )}
-                  </div>
-                )}
-                {!onlyMissing && (
-                  <div className={cn("px-2 py-1.5", visible.length + catOneOffs.length + catCard.length > 0 && "border-t border-[var(--color-border)]")}>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-[var(--color-primary)]"
-                      onClick={() => setEditingOneOff({ oneOff: null, category_id: cat.id })}
-                    >
-                      <Plus /> Add entry to {cat.name}
-                    </Button>
-                  </div>
-                )}
-              </Card>
+              <CategoryCard
+                key={cat.id}
+                category={cat}
+                lineItems={visible}
+                month={month}
+                ledger={ledger}
+                showOther={!onlyMissing}
+                onAdd={() => setEditingOneOff({ oneOff: null, category_id: cat.id })}
+                onEdit={(o) => setEditingOneOff({ oneOff: o })}
+                onShowCard={showCard}
+              />
             );
           })}
 
-          <Card>
-            <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
-              <h2 className="flex items-center gap-2 font-semibold">
-                <ShoppingBag className="h-4 w-4" aria-hidden /> All entries this month
-              </h2>
-              <span className="text-sm font-medium tabular-nums">{formatMoney(summary.oneOffs, true)}</span>
-            </div>
-            {monthOneOffs.length ? (
-              <OneOffList
-                oneOffs={monthOneOffs}
-                categories={categories}
-                items={items}
-                onEdit={(o) => setEditingOneOff({ oneOff: o })}
-              />
-            ) : (
-              <p className="px-4 py-3 text-sm text-[var(--color-muted-foreground)]">
-                No entries this month. Add itemized spending like “Hotel $500” to any category.
-              </p>
-            )}
-            <div className="px-2 py-1">
-              <Button variant="ghost" size="sm" onClick={() => setEditingOneOff({ oneOff: null })}>
-                <Plus /> Add entry
-              </Button>
-            </div>
-          </Card>
-
           {onlyMissing && enteredCount === activeItems.length && (
             <p className="py-8 text-center text-[var(--color-muted-foreground)]">
-              Everything for {formatMonth(month)} is entered.
+              Every line item has something for {formatMonth(month)}.
             </p>
           )}
         </div>
@@ -353,7 +265,7 @@ export function MonthEntry() {
       {editingOneOff && (
         <OneOffDialog
           oneOff={editingOneOff.oneOff}
-          defaults={{ month, category_id: editingOneOff.category_id, line_item_id: editingOneOff.line_item_id }}
+          defaults={{ month, category_id: editingOneOff.category_id }}
           categories={categories}
           items={items}
           onClose={() => setEditingOneOff(null)}
@@ -367,196 +279,126 @@ export function MonthEntry() {
   );
 }
 
-function AmountRow({
-  item,
+/** A category for one month: its line items, its "Other" row, and the button to add a manual entry. */
+function CategoryCard({
+  category,
+  lineItems,
   month,
   ledger,
-  onSaved,
-  onEnter,
-  onEditOneOff,
+  showOther,
+  onAdd,
+  onEdit,
   onShowCard,
 }: {
-  item: LineItem;
+  category: Category;
+  lineItems: LineItem[];
   month: string;
   ledger: Ledger;
-  onSaved: (saved: MonthlyAmount | null) => void;
-  onEnter: (input: HTMLInputElement) => void;
-  onEditOneOff: (o: OneOff) => void;
-  onShowCard: (card: Transaction[]) => void;
+  showOther: boolean;
+  onAdd: () => void;
+  onEdit: (o: OneOff) => void;
+  onShowCard: (title: string, description: string, card: Transaction[]) => void;
 }) {
-  const idx = ledger.idx;
-  const value = idx.get(item.id)?.get(month);
-  const note = ledger.notes.get(item.id)?.get(month) ?? "";
-  const linked = itemOneOffs(ledger, item.id, month);
-  const card = itemCard(ledger, item.id, month);
-  const cardTotal = sumMoney(card.map((t) => t.amount));
-  const [showCard, setShowCard] = useState(false);
-  const suggestion = value === undefined && !card.length ? suggestedAmount(item, month, idx) : null;
-  const saver = useCellSaver(item.id, month, value, onSaved);
-  const [noteOpen, setNoteOpen] = useState(false);
-  const [noteText, setNoteText] = useState(note);
-  const [noteError, setNoteError] = useState<string | null>(null);
-
-  async function commitNote() {
-    if (noteText.trim() === note) {
-      setNoteOpen(false);
-      return;
-    }
-    try {
-      onSaved(await saveNote(item.id, month, noteText));
-      setNoteOpen(false);
-      setNoteError(null);
-    } catch (err) {
-      setNoteError(err instanceof Error ? err.message : "Could not save note");
-    }
-  }
-
-  const hint = value !== undefined && value > 0 ? anomalyHint(item, month, value, idx) : null;
-  const total = itemMonthTotal(ledger, item.id, month) ?? 0;
-  const inputId = `amt-${item.id}`;
-  const message = saver.message ?? noteError;
+  const otherEntries = categoryOneOffs(ledger, category.id, month);
+  const otherCard = categoryCard(ledger, category.id, month);
+  const hasOther = showOther && otherEntries.length + otherCard.length > 0;
+  const subtotal = totalForCategoryMonth(ledger, category.id, month);
+  const otherTotal = sumMoney([...otherEntries, ...otherCard].map((x) => x.amount));
 
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
-      <label htmlFor={inputId} className="min-w-0 flex-1">
-        <span
-          className={cn("block truncate", value === undefined && !card.length && "text-[var(--color-muted-foreground)]")}
-        >
-          {item.name}
-        </span>
-        {item.recurrence !== "none" && (
-          <span className="text-xs text-[var(--color-muted-foreground)]">
-            {item.recurrence === "fixed" ? "Fixed" : "Monthly"}
-          </span>
+    <Card>
+      <div className="space-y-2 border-b border-[var(--color-border)] px-4 py-3">
+        <div className="flex items-baseline justify-between">
+          <h2 className="font-semibold">
+            {category.name}
+            <span className="ml-2 text-xs font-normal text-[var(--color-muted-foreground)]">{KIND_LABEL[category.kind]}</span>
+          </h2>
+          <span className="text-sm font-medium tabular-nums">{formatMoney(subtotal, true)}</span>
+        </div>
+        {category.monthly_budget != null && category.kind !== "income" && (
+          <BudgetBar spent={subtotal} budget={category.monthly_budget} />
         )}
-      </label>
-      <div className="flex items-center gap-1.5">
-        {suggestion !== null && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-9 px-2 text-xs"
-            onClick={() => saver.commit(String(suggestion))}
-            aria-label={`Use ${formatMoney(suggestion, true)} for ${item.name}`}
-            title={item.recurrence === "fixed" ? "Use the usual amount" : "Use last month's amount"}
-          >
-            <Check /> {formatMoney(suggestion)}
-          </Button>
-        )}
-        {value !== undefined && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn("h-9 w-9", !note && "text-[var(--color-muted-foreground)]")}
-            onClick={() => {
-              setNoteText(note);
-              setNoteOpen((o) => !o);
-            }}
-            aria-label={note ? `Edit note for ${item.name}` : `Add note for ${item.name}`}
-            aria-expanded={noteOpen}
-            title={note || "Add a note"}
-          >
-            <MessageSquare className={cn(note && "fill-current")} />
-          </Button>
-        )}
-        {card.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setShowCard((v) => !v)}
-            aria-expanded={showCard}
-            aria-label={`${formatMoney(cardTotal, true)} from ${card.length} Amex ${card.length === 1 ? "charge" : "charges"}; ${showCard ? "hide" : "show"} them`}
-            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-muted)]/50 px-2 text-sm tabular-nums hover:bg-[var(--color-accent)]"
-            title="Amex charges in this line"
-          >
-            <CreditCard className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" aria-hidden />
-            {formatMoney(cardTotal, true)}
-            <span className="rounded bg-[var(--color-card)] px-1 text-[10px] font-semibold text-[var(--color-muted-foreground)]">
-              {card.length}
-            </span>
-          </button>
-        )}
-        <AmountInput id={inputId} value={value} saver={saver} onEnter={onEnter} covered={card.length > 0} />
       </div>
-      {note && !noteOpen && (
-        <p className="w-full text-right text-xs text-[var(--color-muted-foreground)]">“{note}”</p>
-      )}
-      {noteOpen && (
-        <div className="flex w-full justify-end">
-          <input
-            autoFocus
-            aria-label={`Note for ${item.name}`}
-            className="h-8 w-full max-w-sm rounded-md border border-[var(--color-input)] bg-transparent px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
-            placeholder="e.g. AC ran all month"
-            value={noteText}
-            onChange={(e) => setNoteText(e.target.value)}
-            onBlur={commitNote}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") e.currentTarget.blur();
-              if (e.key === "Escape") {
-                setNoteText(note);
-                setNoteOpen(false);
-              }
-            }}
+      <ul className="divide-y divide-[var(--color-border)] empty:hidden">
+        {lineItems.map((item) => (
+          <ItemSection
+            key={item.id}
+            label={item.name}
+            total={itemMonthTotal(ledger, item.id, month)}
+            budget={item.monthly_budget}
+            entries={itemOneOffs(ledger, item.id, month)}
+            card={itemCard(ledger, item.id, month)}
+            onEdit={onEdit}
+            onShowCard={(card) =>
+              onShowCard(`${item.name} · ${formatMonth(month)}`, "Card charges in this line. Move any that belong elsewhere.", card)
+            }
           />
+        ))}
+        {hasOther && (
+          <ItemSection
+            label="Other"
+            muted
+            total={otherTotal}
+            entries={otherEntries}
+            card={otherCard}
+            onEdit={onEdit}
+            onShowCard={(card) =>
+              onShowCard(
+                `${category.name} · Other · ${formatMonth(month)}`,
+                "Card charges filed to this category without a specific line. Move any that belong elsewhere.",
+                card
+              )
+            }
+          />
+        )}
+      </ul>
+      {showOther && (
+        <div className={cn("px-2 py-1.5", lineItems.length + (hasOther ? 1 : 0) > 0 && "border-t border-[var(--color-border)]")}>
+          <Button variant="ghost" size="sm" className="text-[var(--color-primary)]" onClick={onAdd}>
+            <Plus /> Add manual entry
+          </Button>
         </div>
       )}
-      {showCard && card.length > 0 && (
-        <div className="w-full rounded-md border border-[var(--color-border)] text-sm">
-          <ul className="divide-y divide-[var(--color-border)]">
-            {[...card]
-              .sort((a, b) => b.posted_on.localeCompare(a.posted_on))
-              .map((t) => (
-                <li key={t.id} className="flex items-center gap-3 px-3 py-1.5">
-                  <span className="w-10 shrink-0 text-xs tabular-nums text-[var(--color-muted-foreground)]">
-                    {formatDay(t.posted_on)}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate">{t.merchant}</span>
-                  <span
-                    className={cn(
-                      "tabular-nums",
-                      t.amount < 0 ? "text-[var(--color-success)]" : "text-[var(--color-foreground)]"
-                    )}
-                  >
-                    {formatMoney(t.amount, true)}
-                  </span>
-                </li>
-              ))}
-          </ul>
-          <div className="border-t border-[var(--color-border)] px-1 py-0.5">
-            <Button variant="ghost" size="sm" className="text-[var(--color-primary)]" onClick={() => onShowCard(card)}>
-              Move charges to another line…
-            </Button>
-          </div>
+    </Card>
+  );
+}
+
+/** A line item (or the category's "Other" row): its total, then the manual entries and card charges that make it up. */
+function ItemSection({
+  label,
+  muted = false,
+  total,
+  budget,
+  entries,
+  card,
+  onEdit,
+  onShowCard,
+}: {
+  label: string;
+  muted?: boolean;
+  total: number | undefined;
+  budget?: number | null;
+  entries: OneOff[];
+  card: Transaction[];
+  onEdit: (o: OneOff) => void;
+  onShowCard: (card: Transaction[]) => void;
+}) {
+  return (
+    <li>
+      <div className="flex items-center gap-3 px-4 pt-2.5 pb-2">
+        <span className={cn("min-w-0 flex-1 truncate", muted && "italic", total === undefined && "text-[var(--color-muted-foreground)]")}>
+          {label}
+        </span>
+        <span className={cn("tabular-nums", total === undefined ? "text-[var(--color-muted-foreground)]" : "font-medium")}>
+          {total === undefined ? "—" : formatMoney(total, true)}
+        </span>
+      </div>
+      {budget != null && <BudgetBar spent={total ?? 0} budget={budget} className="px-4 pb-2" />}
+      {(entries.length > 0 || card.length > 0) && (
+        <div className="pb-1.5 pl-4 [&_button]:pl-3">
+          {card.length > 0 && <CardChargesRow charges={card} onClick={() => onShowCard(card)} />}
+          <OneOffList oneOffs={entries} categories={[]} items={[]} showTarget={false} onEdit={onEdit} className="divide-y-0" />
         </div>
-      )}
-      {linked.length > 0 && (
-        <div className="w-full space-y-0.5 text-right text-xs text-[var(--color-muted-foreground)]">
-          {linked.map((o) => (
-            <button key={o.id} type="button" className="block w-full text-right hover:underline" onClick={() => onEditOneOff(o)}>
-              + {formatMoney(o.amount, true)} {o.name}
-            </button>
-          ))}
-        </div>
-      )}
-      {/* A total only helps when the line adds up more than one thing */}
-      {[value !== undefined, card.length > 0, linked.length > 0].filter(Boolean).length > 1 && (
-        <p className="w-full text-right text-xs font-medium">Total {formatMoney(total, true)}</p>
-      )}
-      {item.monthly_budget != null && (
-        <BudgetBar spent={total} budget={item.monthly_budget} className="w-full" />
-      )}
-      {(message || hint) && (
-        <p
-          className={cn(
-            "flex w-full items-center justify-end gap-1 text-xs",
-            message ? "text-[var(--color-destructive)]" : "text-[var(--color-warning)]"
-          )}
-        >
-          {!message && <AlertTriangle className="h-3 w-3" aria-hidden />}
-          {message ?? `${hint}, double-check this amount`}
-        </p>
       )}
     </li>
   );

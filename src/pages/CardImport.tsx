@@ -9,15 +9,12 @@ import { DestinationSelect } from "@/components/CardTransactions";
 import { parseAmexStatement, type ParsedStatement } from "@/lib/amex";
 import {
   addMonths,
-  fetchAmounts,
   fetchOneOffs,
   fetchStructure,
   formatMoney,
   formatMonth,
-  indexAmounts,
   monthSlug,
   sumMoney,
-  type AmountIndex,
   type Category,
   type LineItem,
   type OneOff,
@@ -47,8 +44,6 @@ type Loaded = {
   categories: Category[];
   items: LineItem[];
   oneOffs: OneOff[];
-  /** Typed amounts for the statement's months, to warn about double counting */
-  typed: AmountIndex;
 };
 
 const REASON_LABEL: Record<ReviewRow["reason"], string> = {
@@ -57,7 +52,7 @@ const REASON_LABEL: Record<ReviewRow["reason"], string> = {
   "category rule": "Your rule",
   split: "Split with a friend",
   suggested: "Suggested",
-  "matches one-off": "Matches an entry",
+  "matches one-off": "Matches a manual entry",
   none: "",
 };
 
@@ -106,11 +101,10 @@ export function CardImport() {
       const monthsInFile = [...new Set(statement.rows.map((r) => r.month))].sort();
       const from = monthsInFile[0];
       const to = addMonths(monthsInFile[monthsInFile.length - 1], 1);
-      const [structure, rules, existing, amounts, oneOffs] = await Promise.all([
+      const [structure, rules, existing, oneOffs] = await Promise.all([
         fetchStructure(),
         fetchRules(),
         fetchExistingRefs(statement.rows.map((r) => r.externalId)),
-        fetchAmounts(from, to),
         fetchOneOffs(from, to),
       ]);
       const covered = await fetchCoveredOneOffIds(oneOffs.map((o) => o.id));
@@ -123,7 +117,6 @@ export function CardImport() {
         alreadyImported: statement.rows.length - fresh.length,
         ...structure,
         oneOffs,
-        typed: indexAmounts(amounts),
       });
       setRows(review);
     } catch (err) {
@@ -185,12 +178,13 @@ export function CardImport() {
   const oneOffById = useMemo(() => new Map((loaded?.oneOffs ?? []).map((o) => [o.id, o])), [loaded]);
   const members = [...new Set(rows.map((r) => r.row.cardMember).filter((m): m is string => !!m))];
 
-  /** Typed amount already in the cell this charge would add to */
-  const typedClash = (r: ReviewRow) => {
-    if (!r.value || r.value === EXCLUDE || r.value.startsWith("oneoff:")) return null;
-    return loaded?.typed.get(r.value)?.get(r.row.month) ?? null;
+  /** Manual entries already on the line item this charge would add to (it may be the same bill) */
+  const entryClash = (r: ReviewRow) => {
+    if (!r.value || r.value === EXCLUDE || r.value.startsWith("oneoff:") || r.value.startsWith("category:")) return null;
+    const list = loaded?.oneOffs.filter((o) => o.line_item_id === r.value && o.month === r.row.month) ?? [];
+    return list.length ? sumMoney(list.map((o) => o.amount)) : null;
   };
-  const needsAttention = (r: ReviewRow) => r.value === "" || typedClash(r) !== null;
+  const needsAttention = (r: ReviewRow) => r.value === "" || entryClash(r) !== null;
   const visible = rows.filter((r) => (!attentionOnly || needsAttention(r)) && (!member || r.row.cardMember === member));
 
   const parsedCharges = sumMoney(loaded?.statement.rows.filter((r) => r.amount > 0).map((r) => r.amount) ?? []);
@@ -219,7 +213,7 @@ export function CardImport() {
         return loaded.statement.periodStart! > m || loaded.statement.periodEnd! < addDays(end, -1);
       })
     : [];
-  const clashes = rows.filter((r) => typedClash(r) !== null).length;
+  const clashes = rows.filter((r) => entryClash(r) !== null).length;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -236,8 +230,8 @@ export function CardImport() {
           </CardTitle>
           <CardDescription>
             On americanexpress.com go to Statements &amp; Activity, pick the statement, and choose Download → Excel
-            (CSV works too). Each charge is filed under a line item and added on top of what you've typed. Nothing you
-            typed is overwritten. Charges land in the month they were made, so a statement can cover two months.
+            (CSV works too). Each charge is filed under a line item or category and counts toward its total, alongside
+            any manual entries. Charges land in the month they were made, so a statement can cover two months.
             Uploading the same statement again only adds charges that aren't in yet.
           </CardDescription>
         </CardHeader>
@@ -336,15 +330,15 @@ export function CardImport() {
                           + {formatMoney(m.unfiledTotal, true)} uncategorized ({m.unfiled})
                         </span>
                       )}
-                                            {m.covered > 0 && ` · ${formatMoney(m.covered, true)} already added as entries`}
+                                            {m.covered > 0 && ` · ${formatMoney(m.covered, true)} already added as manual entries`}
                     </p>
                   ))}
                   {clashes > 0 && (
                     <p className="flex items-start gap-2 text-[var(--color-warning)]">
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                      {clashes} {clashes === 1 ? "charge goes" : "charges go"} to a line that already has a typed amount
-                      that month. Card charges add on top, so if the typed amount was the same bill, choose “Don't count”
-                      here or clear the typed amount afterwards.
+                      {clashes} {clashes === 1 ? "charge goes" : "charges go"} to a line that already has a manual entry
+                      that month. Both count, so if the entry was the same bill, link the charge to it (“Already added as a
+                      manual entry”) or delete the entry afterwards.
                     </p>
                   )}
                 </CardContent>
@@ -372,7 +366,7 @@ export function CardImport() {
                 </div>
                 <ul className="divide-y divide-[var(--color-border)]">
                   {visible.map((r) => {
-                    const clash = typedClash(r);
+                    const clash = entryClash(r);
                     const linkedOneOff = r.value.startsWith("oneoff:") ? oneOffById.get(r.value.slice(7)) : undefined;
                     return (
                       <li key={r.row.externalId} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
@@ -415,13 +409,13 @@ export function CardImport() {
                         {clash !== null && (
                           <p className="flex w-full items-center justify-end gap-1 text-xs text-[var(--color-warning)]">
                             <AlertTriangle className="h-3 w-3" aria-hidden />
-                            {formatMoney(clash, true)} is already typed for {itemById.get(r.value)?.name} in{" "}
+                            {itemById.get(r.value)?.name} already has {formatMoney(clash, true)} in manual entries for{" "}
                             {formatMonth(r.row.month, "short")}. This charge adds on top.
                           </p>
                         )}
                         {linkedOneOff && (
                           <p className="w-full text-right text-xs text-[var(--color-muted-foreground)]">
-                            Counted through the entry “{linkedOneOff.name}” ({formatMoney(linkedOneOff.amount, true)}),
+                            Counted through the manual entry “{linkedOneOff.name}” ({formatMoney(linkedOneOff.amount, true)}),
                             not again.
                           </p>
                         )}

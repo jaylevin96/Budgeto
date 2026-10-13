@@ -15,11 +15,9 @@ import {
   formatMoney,
   KIND_LABEL,
   parseAmount,
-  RECURRENCE_LABEL,
   type Category,
   type CategoryKind,
   type LineItem,
-  type Recurrence,
 } from "@/lib/budget";
 import { cn } from "@/lib/utils";
 
@@ -170,12 +168,11 @@ export function Settings() {
                       {item.name}
                       {item.archived && <span className="ml-2 text-xs">(archived)</span>}
                     </div>
-                    <div className="text-xs text-[var(--color-muted-foreground)]">
-                      {RECURRENCE_LABEL[item.recurrence]}
-                      {item.recurrence === "fixed" && item.default_amount != null &&
-                        ` · ${formatMoney(item.default_amount, true)}`}
-                      {item.monthly_budget != null && ` · Budget ${formatMoney(item.monthly_budget)}/mo`}
-                    </div>
+                    {item.monthly_budget != null && (
+                      <div className="text-xs text-[var(--color-muted-foreground)]">
+                        Budget {formatMoney(item.monthly_budget)}/mo
+                      </div>
+                    )}
                   </div>
                   <Button
                     variant="ghost"
@@ -285,11 +282,17 @@ function CategoryDialog({
     if (!category) return;
     if (
       !window.confirm(
-        `Delete "${category.name}" and ALL of its line items and every amount ever entered for them? Its entries are kept as uncategorized. Archive it instead to keep history.`
+        `Delete "${category.name}", ALL of its line items and every manual entry in it? Its card charges go back to unfiled. Archive it instead to keep history.`
       )
     )
       return;
     setBusy(true);
+    // Manual entries always belong to a category, so they go with it (the database would only unlink them)
+    const { error: entriesErr } = await supabase.from("one_offs").delete().eq("category_id", category.id);
+    if (entriesErr) {
+      setBusy(false);
+      return setError(entriesErr.message);
+    }
     const { error: err } = await supabase.from("categories").delete().eq("id", category.id);
     setBusy(false);
     if (err) return setError(err.message);
@@ -364,8 +367,6 @@ function ItemDialog({
 }) {
   const [name, setName] = useState(item?.name ?? "");
   const [catId, setCatId] = useState(item?.category_id ?? categoryId);
-  const [recurrence, setRecurrence] = useState<Recurrence>(item?.recurrence ?? "none");
-  const [amountText, setAmountText] = useState(item?.default_amount != null ? String(item.default_amount) : "");
   const [archived, setArchived] = useState(item?.archived ?? false);
   const [budgetText, setBudgetText] = useState(item?.monthly_budget != null ? String(item.monthly_budget) : "");
   const [error, setError] = useState<string | null>(null);
@@ -374,9 +375,6 @@ function ItemDialog({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return setError("Name is required");
-    const amount = parseAmount(amountText);
-    if (Number.isNaN(amount)) return setError("Usual amount must be a number like 4700 or 85.50");
-    if (recurrence === "fixed" && amount === null) return setError("Fixed items need a usual amount");
     const budget = parseAmount(budgetText);
     if (Number.isNaN(budget)) return setError("Budget must be a number like 600 or 75.50");
     setBusy(true);
@@ -384,8 +382,6 @@ function ItemDialog({
     const row = {
       name: name.trim(),
       category_id: catId,
-      recurrence,
-      default_amount: recurrence === "none" ? null : amount,
       monthly_budget: budget,
       archived,
     };
@@ -399,7 +395,7 @@ function ItemDialog({
 
   async function handleDelete() {
     if (!item) return;
-    if (!window.confirm(`Delete "${item.name}" and every amount entered for it? Its entries stay in the category. Archive it instead to keep history.`)) return;
+    if (!window.confirm(`Delete "${item.name}"? Its manual entries stay in the category (under Other); its card charges go back to unfiled. Archive it instead to keep history.`)) return;
     setBusy(true);
     const { error: err } = await supabase.from("line_items").delete().eq("id", item.id);
     setBusy(false);
@@ -412,7 +408,9 @@ function ItemDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{item ? "Edit line item" : "New line item"}</DialogTitle>
-          <DialogDescription>How often it shows up decides what the Month page pre-fills.</DialogDescription>
+          <DialogDescription>
+            A line within the category (Rent, Groceries). Manual entries and card charges can be filed to it.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -429,28 +427,6 @@ function ItemDialog({
               ))}
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="item-rec">How often</Label>
-            <Select id="item-rec" value={recurrence} onChange={(e) => setRecurrence(e.target.value as Recurrence)}>
-              <option value="fixed">{RECURRENCE_LABEL.fixed} (rent, wages, 401k)</option>
-              <option value="variable">{RECURRENCE_LABEL.variable} (utilities, groceries)</option>
-              <option value="none">{RECURRENCE_LABEL.none} (vacations, gifts)</option>
-            </Select>
-          </div>
-          {recurrence !== "none" && (
-            <div className="space-y-2">
-              <Label htmlFor="item-amt">
-                Usual amount {recurrence === "variable" && <span className="font-normal">(optional; last month is used)</span>}
-              </Label>
-              <Input
-                id="item-amt"
-                inputMode="decimal"
-                value={amountText}
-                onChange={(e) => setAmountText(e.target.value)}
-                placeholder="0.00"
-              />
-            </div>
-          )}
           <BudgetField id="item-budget" value={budgetText} onChange={setBudgetText} />
           {item && (
             <label className="flex items-center gap-2 text-sm">

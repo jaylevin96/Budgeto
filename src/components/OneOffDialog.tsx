@@ -17,7 +17,7 @@ import {
   type OneOff,
 } from "@/lib/budget";
 
-/** Add or edit an entry (a one_offs row). `onSaved(id, null)` means it was deleted. */
+/** Add or edit a manual entry (a one_offs row). `onSaved(id, null)` means it was deleted. */
 export function OneOffDialog({
   oneOff,
   defaults,
@@ -38,9 +38,12 @@ export function OneOffDialog({
   const [amountText, setAmountText] = useState(oneOff ? String(oneOff.amount) : "");
   const [monthIdx, setMonthIdx] = useState(initialMonth.month);
   const [yearText, setYearText] = useState(String(initialMonth.year));
-  const [categoryId, setCategoryId] = useState(oneOff?.category_id ?? defaults.category_id ?? "");
+  const [categoryId, setCategoryId] = useState(
+    oneOff?.category_id ?? items.find((i) => i.id === oneOff?.line_item_id)?.category_id ?? defaults.category_id ?? ""
+  );
   const [lineItemId, setLineItemId] = useState(oneOff?.line_item_id ?? defaults.line_item_id ?? "");
   const [note, setNote] = useState(oneOff?.note ?? "");
+  const [repeats, setRepeats] = useState(oneOff?.repeats ?? false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -48,10 +51,14 @@ export function OneOffDialog({
   const categoryItems = items.filter(
     (i) => i.category_id === categoryId && (!i.archived || i.id === lineItemId)
   );
+  const lineItemName = categoryItems.find((i) => i.id === lineItemId)?.name;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return setError("Give it a name, e.g. Hotel");
+    if (!categoryId) return setError("Pick a category");
+    // On a line item the name can default to the line's name ("Rent")
+    const entryName = name.trim() || lineItemName;
+    if (!entryName) return setError("Give it a name, e.g. Hotel");
     const amount = parseAmount(amountText);
     if (amount === null || Number.isNaN(amount)) return setError("Enter an amount like 400 or 399.99");
     const year = Number(yearText);
@@ -60,12 +67,13 @@ export function OneOffDialog({
     setError(null);
     try {
       const saved = await saveOneOff(oneOff?.id ?? null, {
-        name: name.trim(),
+        name: entryName,
         amount,
         month: monthKey(year, monthIdx),
-        category_id: categoryId || null,
-        line_item_id: categoryId && lineItemId ? lineItemId : null,
+        category_id: categoryId,
+        line_item_id: lineItemId || null,
         note: note || null,
+        repeats,
       });
       onSaved(saved.id, saved);
     } catch (err) {
@@ -90,13 +98,59 @@ export function OneOffDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{oneOff ? "Edit entry" : "New entry"}</DialogTitle>
+          <DialogTitle>{oneOff ? "Edit manual entry" : "Add manual entry"}</DialogTitle>
           <DialogDescription>
-            A named amount for one month, like “Hotel $500” or “Snorkel tour $120”. Put it in a category (and
-            optionally a line item) so it rolls into that total, or leave it uncategorized.
+            A named amount for one month, like “Rent $2,000” or “Hotel $500”. It counts toward its category; pick a
+            line item to roll it into that line.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {oneOff && !oneOff.category_id && (
+            <p className="rounded-md bg-[var(--color-muted)] px-3 py-2 text-sm">
+              This entry has no category yet. Manual entries now always belong to a category; pick one to save it.
+            </p>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="oo-cat">Category</Label>
+              <Select
+                id="oo-cat"
+                value={categoryId}
+                onChange={(e) => {
+                  setCategoryId(e.target.value);
+                  setLineItemId("");
+                }}
+                required
+              >
+                {!categoryId && (
+                  <option value="" disabled>
+                    Pick a category…
+                  </option>
+                )}
+                {activeCategories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="oo-item">Line item</Label>
+              <Select
+                id="oo-item"
+                value={lineItemId}
+                onChange={(e) => setLineItemId(e.target.value)}
+                disabled={!categoryId || categoryItems.length === 0}
+              >
+                <option value="">None (shows under Other)</option>
+                {categoryItems.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
           <div className="grid gap-4 sm:grid-cols-[1fr_9rem]">
             <div className="space-y-2">
               <Label htmlFor="oo-name">What was it?</Label>
@@ -104,9 +158,8 @@ export function OneOffDialog({
                 id="oo-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Hotel"
+                placeholder={lineItemName ?? "Hotel"}
                 autoFocus
-                required
               />
             </div>
             <div className="space-y-2">
@@ -137,37 +190,15 @@ export function OneOffDialog({
               <Input id="oo-year" inputMode="numeric" value={yearText} onChange={(e) => setYearText(e.target.value)} />
             </div>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="oo-cat">Category (optional)</Label>
-            <Select
-              id="oo-cat"
-              value={categoryId}
-              onChange={(e) => {
-                setCategoryId(e.target.value);
-                setLineItemId("");
-              }}
-            >
-              <option value="">None (uncategorized spending)</option>
-              {activeCategories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          {categoryId && categoryItems.length > 0 && (
-            <div className="space-y-2">
-              <Label htmlFor="oo-item">Line item (optional)</Label>
-              <Select id="oo-item" value={lineItemId} onChange={(e) => setLineItemId(e.target.value)}>
-                <option value="">None (shows in this category’s entries)</option>
-                {categoryItems.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {i.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          )}
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-0.5 h-4 w-4" checked={repeats} onChange={(e) => setRepeats(e.target.checked)} />
+            <span>
+              <span className="font-medium">Repeats monthly</span>
+              <span className="block text-xs text-[var(--color-muted-foreground)]">
+                Next month offers to copy it in one click (rent, wages, subscriptions).
+              </span>
+            </span>
+          </label>
           <div className="space-y-2">
             <Label htmlFor="oo-note">Note (optional)</Label>
             <Input id="oo-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Spring break" />

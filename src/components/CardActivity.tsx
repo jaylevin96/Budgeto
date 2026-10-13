@@ -173,7 +173,7 @@ export function CardActivity({
               onClick={() => open(`Not counted separately · ${formatMonth(month)}`, notCounted)}
             >
               {formatMoney(sumMoney(notCounted.map((t) => t.amount)), true)} not counted ({notCounted.length}): card
-              payments, “don't count”, or already added as entries
+              payments, “don't count”, or already added as manual entries
             </button>
           )}
         </div>

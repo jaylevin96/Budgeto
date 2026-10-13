@@ -7,7 +7,7 @@ import { FormError, FormSuccess } from "@/components/ui/form-message";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { applyBudget, parseBudgetWorkbook, type ImportResult, type ParsedBudget } from "@/lib/importer";
-import { formatMoney, KIND_LABEL, MONTH_SHORT, RECURRENCE_LABEL, sumMoney } from "@/lib/budget";
+import { formatMoney, KIND_LABEL, MONTH_SHORT, sumMoney } from "@/lib/budget";
 import { cn } from "@/lib/utils";
 
 export function Import() {
@@ -70,7 +70,7 @@ export function Import() {
         return { income, spending, savings, net: sumMoney([income, -spending, -savings]) };
       })
     : [];
-  const cellCount = parsed?.sections.reduce((n, s) => n + s.items.reduce((k, i) => k + i.values.filter((v) => v !== null).length, 0), 0) ?? 0;
+  const cellCount = parsed?.sections.reduce((n, s) => n + s.items.reduce((k, i) => k + i.values.filter((v) => v !== null && v > 0).length, 0), 0) ?? 0;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -85,10 +85,10 @@ export function Import() {
           <CardTitle className="text-xl">Import budget spreadsheet</CardTitle>
           <CardDescription>
             Upload the yearly budget workbook (.xlsx). Each section header row (e.g. <em>HOME | JAN | … | DEC</em>)
-            becomes a category, each row a line item, and each filled cell a monthly amount. Totals rows are
-            skipped and recalculated. Re-importing is safe: existing items are matched by name and amounts are
-            overwritten with the spreadsheet's values. (Don't re-import a Budgeto export into the same account:
-            its cells already include entries and card charges, which would then be counted twice.)
+            becomes a category, each row a line item, and each filled cell a manual entry on that line (rows that
+            fill most months are marked as repeating). Totals rows are skipped and recalculated. Re-importing is
+            safe: existing items are matched by name and the entries an earlier import made are replaced. (Don't re-import a Budgeto export into the same account:
+            its cells already include manual entries and card charges, which would then be counted twice.)
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -106,7 +106,7 @@ export function Import() {
           {result && (
             <FormSuccess>
               Imported {result.categoriesCreated} new categories, {result.itemsCreated} new line items and{" "}
-              {result.amountsSaved} monthly amounts. <Link className="underline" to="/">Open the dashboard</Link>
+              {result.entriesSaved} manual entries. <Link className="underline" to="/">Open the dashboard</Link>
             </FormSuccess>
           )}
         </CardContent>
@@ -122,7 +122,7 @@ export function Import() {
               </div>
               <p className="flex-1 text-sm text-[var(--color-muted-foreground)]">
                 {parsed.sections.length} categories ·{" "}
-                {parsed.sections.reduce((n, s) => n + s.items.length, 0)} line items · {cellCount} monthly amounts
+                {parsed.sections.reduce((n, s) => n + s.items.length, 0)} line items · {cellCount} manual entries
               </p>
               <Button onClick={handleImport} disabled={busy || !!result}>
                 {busy ? "Importing…" : result ? "Imported" : "Import"}
@@ -198,8 +198,7 @@ function PreviewSection({ section }: { section: ParsedBudget["sections"][number]
         <tr key={item.name} className="border-b border-[var(--color-border)]">
           <td className="px-3 py-1.5 whitespace-nowrap">{item.name}</td>
           <td className="px-2 py-1.5 text-xs whitespace-nowrap text-[var(--color-muted-foreground)]">
-            {RECURRENCE_LABEL[item.recurrence]}
-            {item.default_amount != null && ` · ${formatMoney(item.default_amount)}`}
+            {item.recurrence === "none" ? "Occasional" : "Repeats monthly"}
           </td>
           {item.values.map((v, i) => (
             <td key={i} className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">

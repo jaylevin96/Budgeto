@@ -155,11 +155,16 @@ export function Dashboard() {
     }));
   const budgetRemaining = sumMoney([...budgetRows.map((r) => r.budget), ...budgetRows.map((r) => -r.spent)]);
 
+  // Biggest one-time spending: skip repeating entries (rent, wages) and income/savings
   const bigPurchases = oneOffs
-    .filter((o) => o.month.startsWith(`${year}-`))
+    .filter(
+      (o) =>
+        o.month.startsWith(`${year}-`) &&
+        !o.repeats &&
+        (!o.category_id || ledger.kindByCategory.get(o.category_id) === "expense")
+    )
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 8);
-  const yearOneOffTotal = sumMoney(oneOffs.filter((o) => o.month.startsWith(`${year}-`)).map((o) => o.amount));
 
   function setYear(y: number) {
     setSearchParams({ year: String(y) });
@@ -240,7 +245,7 @@ export function Dashboard() {
             <SummaryTiles current={current} previous={previous} compareLabel="vs last month" colors={colors} />
             {current.entered < items.filter((i) => !i.archived).length && current.entered > 0 && (
               <p className="text-xs text-[var(--color-muted-foreground)]">
-                {current.entered} of {items.filter((i) => !i.archived).length} items entered for this month.{" "}
+                {current.entered} of {items.filter((i) => !i.archived).length} line items have something this month.{" "}
                 <Link className="underline" to={`/month/${monthSlug(selectedMonth)}`}>
                   Finish entering
                 </Link>
@@ -442,22 +447,17 @@ export function Dashboard() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-lg">
-                  <ShoppingBag className="h-4 w-4" aria-hidden /> Largest entries
+                  <ShoppingBag className="h-4 w-4" aria-hidden /> Largest one-time entries
                 </CardTitle>
                 <CardDescription>
                   {bigPurchases.length
-                    ? `${formatMoney(yearOneOffTotal)} in entries in ${year}.`
-                    : `No entries in ${year} yet.`}
+                    ? `Biggest manual spending entries in ${year} that don't repeat monthly.`
+                    : `No one-time manual entries in ${year} yet.`}
                 </CardDescription>
               </CardHeader>
               {bigPurchases.length > 0 && (
                 <OneOffList oneOffs={bigPurchases} categories={categories} items={items} showMonth onEdit={setEditingOneOff} />
               )}
-              <div className="px-4 pb-4 pt-2">
-                <Button asChild variant="ghost" size="sm">
-                  <Link to={`/entries?year=${year}`}>See all entries</Link>
-                </Button>
-              </div>
             </Card>
           </div>
 
