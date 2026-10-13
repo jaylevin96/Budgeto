@@ -4,6 +4,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   ComposedChart,
   LabelList,
   Legend,
@@ -14,11 +15,10 @@ import {
   YAxis,
   type TooltipProps,
 } from "recharts";
-import { PencilLine, ShoppingBag } from "lucide-react";
+import { ArrowRight, PencilLine, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
-import { Select } from "@/components/ui/select";
 import { BudgetBar } from "@/components/BudgetBar";
 import { EmptyBudget } from "@/components/EmptyBudget";
 import { OneOffDialog } from "@/components/OneOffDialog";
@@ -36,7 +36,6 @@ import {
   itemMonthTotal,
   monthKey,
   monthSlug,
-  MONTH_LONG,
   MONTH_SHORT,
   parseMonthKey,
   summarizeMonth,
@@ -54,7 +53,8 @@ export function Dashboard() {
   const colors = useChartColors();
   const [searchParams, setSearchParams] = useSearchParams();
   const thisMonth = currentMonthKey();
-  const year = Number(searchParams.get("year")) || parseMonthKey(thisMonth).year;
+  const thisYear = parseMonthKey(thisMonth).year;
+  const year = Number(searchParams.get("year")) || thisYear;
 
   const { categories, items, oneOffs, ledger, loading, error, reload, applyOneOff } = useBudget(
     monthKey(year - 1, 0),
@@ -164,9 +164,35 @@ export function Dashboard() {
   function setYear(y: number) {
     setSearchParams({ year: String(y) });
   }
-  function setMonth(m: number) {
-    setSearchParams({ year: String(year), month: String(m + 1) });
+  function selectMonth(key: string) {
+    const { year: y, month: m } = parseMonthKey(key);
+    setSearchParams({ year: String(y), month: String(m + 1) }, { preventScrollReset: true });
   }
+  // Clicking anywhere in a month's column focuses that month
+  function onChartClick(state: { activeTooltipIndex?: number } | null) {
+    const m = state?.activeTooltipIndex != null ? shownMonths[state.activeTooltipIndex] : undefined;
+    if (m) selectMonth(m);
+  }
+  const dim = (m: string) => (m === selectedMonth ? 1 : 0.35);
+  const monthCells = shownMonths.map((m) => <Cell key={m} fillOpacity={dim(m)} />);
+  const monthTick = (props: { x: number; y: number; payload: { value: string; index: number } }) => {
+    const m = shownMonths[props.payload.index];
+    return (
+      <text
+        x={props.x}
+        y={props.y}
+        dy={12}
+        textAnchor="middle"
+        fontSize={12}
+        fill={m === selectedMonth ? colors.tooltipText : colors.axis}
+        fontWeight={m === selectedMonth ? 700 : 400}
+        className="cursor-pointer"
+        onClick={() => m && selectMonth(m)}
+      >
+        {props.payload.value}
+      </text>
+    );
+  };
 
   if (!loading && !error && categories.length === 0) return <EmptyBudget onSeeded={reload} />;
 
@@ -174,25 +200,20 @@ export function Dashboard() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <StepperNav
-          label={String(year)}
+          label={
+            <>
+              {year} <span className="text-[var(--color-muted-foreground)]">· {MONTH_SHORT[selectedIdx]}</span>
+            </>
+          }
           onPrev={() => setYear(year - 1)}
           onNext={() => setYear(year + 1)}
           prevLabel="Previous year"
           nextLabel="Next year"
+          picker={{ mode: "month", value: selectedMonth, onSelect: selectMonth }}
+          onToday={selectedMonth !== thisMonth ? () => selectMonth(thisMonth) : undefined}
+          todayLabel="This month"
         />
         <div className="flex items-center gap-2">
-          <Select
-            aria-label="Month"
-            className="h-9 w-40 rounded-full"
-            value={selectedIdx}
-            onChange={(e) => setMonth(Number(e.target.value))}
-          >
-            {MONTH_LONG.map((name, i) => (
-              <option key={name} value={i}>
-                {name}
-              </option>
-            ))}
-          </Select>
           <Button asChild size="sm">
             <Link to={`/month/${monthSlug(selectedMonth)}`}>
               <PencilLine /> Enter {MONTH_SHORT[selectedIdx]}
@@ -208,7 +229,14 @@ export function Dashboard() {
       ) : (
         <>
           <section className="space-y-3">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted-foreground)]">{formatMonth(selectedMonth)}</h2>
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted-foreground)]">
+              <Link
+                to={`/month/${monthSlug(selectedMonth)}`}
+                className="inline-flex items-center gap-1 hover:text-[var(--color-foreground)] hover:underline"
+              >
+                {formatMonth(selectedMonth)} <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+              </Link>
+            </h2>
             <SummaryTiles current={current} previous={previous} compareLabel="vs last month" colors={colors} />
             {current.entered < items.filter((i) => !i.archived).length && current.entered > 0 && (
               <p className="text-xs text-[var(--color-muted-foreground)]">
@@ -235,13 +263,19 @@ export function Dashboard() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg">Income vs spending by month</CardTitle>
-              <CardDescription>"Left over" is income minus spending and savings.</CardDescription>
+              <CardDescription>"Left over" is income minus spending and savings. Click a month to focus it.</CardDescription>
             </CardHeader>
             <CardContent className="h-80 px-2 sm:px-6">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={monthlyData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barGap={2}>
+                <ComposedChart
+                  data={monthlyData}
+                  margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                  barGap={2}
+                  onClick={onChartClick}
+                  className="cursor-pointer"
+                >
                   <CartesianGrid vertical={false} stroke={colors.grid} />
-                  <XAxis dataKey="label" tick={{ fill: colors.axis, fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="label" tick={monthTick} axisLine={false} tickLine={false} />
                   <YAxis
                     tickFormatter={formatMoneyCompact}
                     tick={{ fill: colors.axis, fontSize: 12 }}
@@ -251,15 +285,32 @@ export function Dashboard() {
                   />
                   <Tooltip content={<MoneyTooltip colors={colors} />} cursor={{ fill: colors.grid, opacity: 0.5 }} />
                   <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" iconSize={10} formatter={legendText(colors)} />
-                  <Bar isAnimationActive={false} dataKey="Income" fill={colors.income} radius={[6, 6, 0, 0]} maxBarSize={22} />
-                  <Bar isAnimationActive={false} dataKey="Spending" fill={colors.spending} radius={[6, 6, 0, 0]} maxBarSize={22} />
-                  <Bar isAnimationActive={false} dataKey="Saved" fill={colors.savings} radius={[6, 6, 0, 0]} maxBarSize={22} />
+                  <Bar isAnimationActive={false} dataKey="Income" fill={colors.income} radius={[6, 6, 0, 0]} maxBarSize={22}>
+                    {monthCells}
+                  </Bar>
+                  <Bar isAnimationActive={false} dataKey="Spending" fill={colors.spending} radius={[6, 6, 0, 0]} maxBarSize={22}>
+                    {monthCells}
+                  </Bar>
+                  <Bar isAnimationActive={false} dataKey="Saved" fill={colors.savings} radius={[6, 6, 0, 0]} maxBarSize={22}>
+                    {monthCells}
+                  </Bar>
                   <Line
                     isAnimationActive={false}
                     dataKey="Left over"
                     stroke={colors.neutral}
                     strokeWidth={2}
-                    dot={{ r: 4, fill: colors.neutral, stroke: colors.surface, strokeWidth: 2 }}
+                    dot={(p: { cx?: number; cy?: number; index: number }) => (
+                      <circle
+                        key={p.index}
+                        cx={p.cx}
+                        cy={p.cy}
+                        r={shownMonths[p.index] === selectedMonth ? 5 : 4}
+                        fill={colors.neutral}
+                        fillOpacity={dim(shownMonths[p.index])}
+                        stroke={colors.surface}
+                        strokeWidth={2}
+                      />
+                    )}
                     activeDot={{ r: 5 }}
                   />
                 </ComposedChart>
@@ -271,13 +322,18 @@ export function Dashboard() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg">Spending by category</CardTitle>
-                <CardDescription>Monthly spending, stacked by category (excludes savings).</CardDescription>
+                <CardDescription>Monthly spending, stacked by category (excludes savings). Click a month to focus it.</CardDescription>
               </CardHeader>
               <CardContent className="h-80 px-2 sm:px-6">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={stackedData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <BarChart
+                    data={stackedData}
+                    margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                    onClick={onChartClick}
+                    className="cursor-pointer"
+                  >
                     <CartesianGrid vertical={false} stroke={colors.grid} />
-                    <XAxis dataKey="label" tick={{ fill: colors.axis, fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="label" tick={monthTick} axisLine={false} tickLine={false} />
                     <YAxis
                       tickFormatter={formatMoneyCompact}
                       tick={{ fill: colors.axis, fontSize: 12 }}
@@ -297,10 +353,14 @@ export function Dashboard() {
                         stroke={colors.surface}
                         strokeWidth={1}
                         maxBarSize={32}
-                      />
+                      >
+                        {monthCells}
+                      </Bar>
                     ))}
                     {hasOther && (
-                      <Bar isAnimationActive={false} dataKey="Other" stackId="s" fill={colors.neutral} stroke={colors.surface} strokeWidth={1} maxBarSize={32} />
+                      <Bar isAnimationActive={false} dataKey="Other" stackId="s" fill={colors.neutral} stroke={colors.surface} strokeWidth={1} maxBarSize={32}>
+                        {monthCells}
+                      </Bar>
                     )}
                   </BarChart>
                 </ResponsiveContainer>
@@ -369,7 +429,9 @@ export function Dashboard() {
                 ) : (
                   budgetRows.map((r) => (
                     <div key={r.cat.id}>
-                      <div className="mb-1 text-sm font-medium">{r.cat.name}</div>
+                      <Link to={`/month/${monthSlug(selectedMonth)}`} className="mb-1 block text-sm font-medium hover:underline">
+                        {r.cat.name}
+                      </Link>
                       <BudgetBar spent={r.spent} budget={r.budget} />
                     </div>
                   ))
@@ -411,7 +473,9 @@ export function Dashboard() {
                 <ul className="divide-y divide-[var(--color-border)]">
                   {changes.map((c) => (
                     <li key={c.item.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                      <span className="truncate">{c.item.name}</span>
+                      <Link to={`/month/${monthSlug(selectedMonth)}`} className="truncate hover:underline">
+                        {c.item.name}
+                      </Link>
                       <span className="flex items-center gap-3 tabular-nums">
                         <span className="text-[var(--color-muted-foreground)]">
                           {formatMoney(c.before)} → {formatMoney(c.now)}

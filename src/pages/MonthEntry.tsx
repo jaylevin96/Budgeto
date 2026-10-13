@@ -129,6 +129,9 @@ export function MonthEntry() {
           onNext={() => go(1)}
           prevLabel="Previous month"
           nextLabel="Next month"
+          picker={{ mode: "month", value: month, onSelect: (m) => navigate(`/month/${monthSlug(m)}`) }}
+          onToday={month !== currentMonthKey() ? () => navigate(`/month/${monthSlug(currentMonthKey())}`) : undefined}
+          todayLabel="This month"
         />
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setEditingOneOff({ oneOff: null })}>

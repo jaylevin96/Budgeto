@@ -75,7 +75,9 @@ export function YearGrid() {
   const params = useParams();
   const navigate = useNavigate();
   const colors = useChartColors();
-  const year = /^\d{4}$/.test(params.year ?? "") ? Number(params.year) : parseMonthKey(currentMonthKey()).year;
+  const thisMonth = currentMonthKey();
+  const thisYear = parseMonthKey(thisMonth).year;
+  const year = /^\d{4}$/.test(params.year ?? "") ? Number(params.year) : thisYear;
   const months = Array.from({ length: 12 }, (_, m) => monthKey(year, m));
 
   const { categories, items, oneOffs, ledger, loading, error, reload, applyAmount, applyOneOff, applyTransactions, applyCreated } = useBudget(
@@ -156,6 +158,9 @@ export function YearGrid() {
           onNext={() => navigate(`/year/${year + 1}`)}
           prevLabel="Previous year"
           nextLabel="Next year"
+          picker={{ mode: "year", value: year, onSelect: (y) => navigate(`/year/${y}`) }}
+          onToday={thisYear !== year ? () => navigate(`/year/${thisYear}`) : undefined}
+          todayLabel="This year"
         />
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="ghost" size="sm" onClick={() => setExpanded(new Set(allGroups))}>
@@ -192,7 +197,14 @@ export function YearGrid() {
                 <th className={cn(stickyName, "bg-[var(--color-card)] font-medium")}>Category / item</th>
                 {months.map((m, i) => (
                   <th key={m} className={cn(cellClass, "font-medium")}>
-                    <Link to={`/month/${monthSlug(m)}`} className="hover:underline">
+                    <Link
+                      to={`/month/${monthSlug(m)}`}
+                      aria-current={m === thisMonth ? "date" : undefined}
+                      className={cn(
+                        "rounded-full px-1.5 py-0.5 hover:underline",
+                        m === thisMonth && "bg-[var(--color-accent)] font-semibold text-[var(--color-accent-foreground)]"
+                      )}
+                    >
                       {MONTH_SHORT[i]}
                     </Link>
                   </th>

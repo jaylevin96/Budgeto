@@ -14,7 +14,8 @@ import { currentMonthKey, formatMoney, formatMonth, monthKey, parseMonthKey, sum
 export function OneOffs() {
   const [searchParams, setSearchParams] = useSearchParams();
   const thisMonth = currentMonthKey();
-  const year = Number(searchParams.get("year")) || parseMonthKey(thisMonth).year;
+  const thisYear = parseMonthKey(thisMonth).year;
+  const year = Number(searchParams.get("year")) || thisYear;
   const { categories, items, oneOffs, loading, error, applyOneOff } = useBudget(monthKey(year, 0), monthKey(year + 1, 0));
   const [editing, setEditing] = useState<{ oneOff: OneOff | null } | null>(null);
 
@@ -34,6 +35,9 @@ export function OneOffs() {
           onNext={() => setSearchParams({ year: String(year + 1) })}
           prevLabel="Previous year"
           nextLabel="Next year"
+          picker={{ mode: "year", value: year, onSelect: (y) => setSearchParams({ year: String(y) }) }}
+          onToday={thisYear !== year ? () => setSearchParams({ year: String(thisYear) }) : undefined}
+          todayLabel="This year"
         />
         <Button size="sm" onClick={() => setEditing({ oneOff: null })}>
           <Plus /> Entry
