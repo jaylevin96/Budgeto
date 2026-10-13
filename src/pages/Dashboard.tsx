@@ -88,7 +88,7 @@ export function Dashboard() {
   );
   const lastYtd = lastYearSummaries.some((s) => s.hasData) ? sumSummaries(lastYearSummaries) : null;
 
-  // Spending groups: expense categories plus uncategorized one-offs and unfiled card charges
+  // Spending groups: expense categories plus uncategorized entries and unfiled card charges
   const spendGroups: SpendGroup[] = [
     ...categories
       .filter((c) => c.kind === "expense")
@@ -380,12 +380,12 @@ export function Dashboard() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-lg">
-                  <ShoppingBag className="h-4 w-4" aria-hidden /> Big purchases
+                  <ShoppingBag className="h-4 w-4" aria-hidden /> Largest entries
                 </CardTitle>
                 <CardDescription>
                   {bigPurchases.length
-                    ? `${formatMoney(yearOneOffTotal)} in one-off purchases in ${year}.`
-                    : `No one-off purchases in ${year} yet.`}
+                    ? `${formatMoney(yearOneOffTotal)} in entries in ${year}.`
+                    : `No entries in ${year} yet.`}
                 </CardDescription>
               </CardHeader>
               {bigPurchases.length > 0 && (
@@ -393,7 +393,7 @@ export function Dashboard() {
               )}
               <div className="px-4 pb-4 pt-2">
                 <Button asChild variant="ghost" size="sm">
-                  <Link to={`/one-offs?year=${year}`}>See all one-offs</Link>
+                  <Link to={`/entries?year=${year}`}>See all entries</Link>
                 </Button>
               </div>
             </Card>

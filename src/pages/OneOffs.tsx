@@ -10,7 +10,7 @@ import { StepperNav } from "@/components/StepperNav";
 import { useBudget } from "@/hooks/useBudget";
 import { currentMonthKey, formatMoney, formatMonth, monthKey, parseMonthKey, sumMoney, type OneOff } from "@/lib/budget";
 
-/** Every one-off purchase in a year, newest month first. */
+/** Every entry (named amount, typed by hand) in a year, newest month first. */
 export function OneOffs() {
   const [searchParams, setSearchParams] = useSearchParams();
   const thisMonth = currentMonthKey();
@@ -29,19 +29,20 @@ export function OneOffs() {
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <StepperNav
-          label={`One-offs ${year}`}
+          label={`Entries ${year}`}
           onPrev={() => setSearchParams({ year: String(year - 1) })}
           onNext={() => setSearchParams({ year: String(year + 1) })}
           prevLabel="Previous year"
           nextLabel="Next year"
         />
         <Button size="sm" onClick={() => setEditing({ oneOff: null })}>
-          <Plus /> One-off
+          <Plus /> Entry
         </Button>
       </div>
       <p className="text-sm text-[var(--color-muted-foreground)]">
-        Bigger one-time purchases. Tied to a line item they add to that item's month; tied to a category they show
-        under it; otherwise they count as uncategorized spending.
+        Itemized spending you add by hand, like “Hotel $500” or “Snorkel tour $120”. Tied to a line item they add to
+        that item's month; tied to a category they show in its entries; otherwise they count as uncategorized
+        spending.
         {yearOneOffs.length > 0 && (
           <>
             {" "}
@@ -56,7 +57,7 @@ export function OneOffs() {
         <p className="text-[var(--color-muted-foreground)]">Loading…</p>
       ) : byMonth.size === 0 ? (
         <Card className="p-6 text-center text-sm text-[var(--color-muted-foreground)]">
-          No one-off purchases in {year} yet.
+          No entries in {year} yet.
         </Card>
       ) : (
         [...byMonth].map(([m, list]) => (

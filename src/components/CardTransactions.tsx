@@ -84,7 +84,7 @@ export function DestinationSelect({
             </optgroup>
           ))}
         {oneOffs.length > 0 && (
-          <optgroup label="Already entered as a one-off">
+          <optgroup label="Already added as an entry">
             {oneOffs.map((o) => (
               <option key={o.id} value={destinationValue({ line_item_id: null, one_off_id: o.id, excluded: false })}>
                 {o.name} ({formatMoney(o.amount)})

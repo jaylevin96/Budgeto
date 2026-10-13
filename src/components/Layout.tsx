@@ -22,7 +22,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { to: "/", label: "Dashboard", icon: LayoutDashboard, active: pathname === "/" },
     { to: `/month/${monthSlug(thisMonth)}`, label: "Month", icon: CalendarDays, active: pathname.startsWith("/month") },
     { to: `/year/${thisMonth.slice(0, 4)}`, label: "Year", icon: Sheet, active: pathname.startsWith("/year") },
-    { to: "/one-offs", label: "One-offs", icon: ShoppingBag, active: pathname.startsWith("/one-offs") },
+    { to: "/entries", label: "Entries", icon: ShoppingBag, active: pathname.startsWith("/entries") },
     { to: "/settings", label: "Settings", icon: Settings, active: pathname.startsWith("/settings") || pathname.startsWith("/import") },
   ];
 

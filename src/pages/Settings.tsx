@@ -285,7 +285,7 @@ function CategoryDialog({
     if (!category) return;
     if (
       !window.confirm(
-        `Delete "${category.name}" and ALL of its line items and every amount ever entered for them? Its one-off purchases are kept as uncategorized. Archive it instead to keep history.`
+        `Delete "${category.name}" and ALL of its line items and every amount ever entered for them? Its entries are kept as uncategorized. Archive it instead to keep history.`
       )
     )
       return;
@@ -399,7 +399,7 @@ function ItemDialog({
 
   async function handleDelete() {
     if (!item) return;
-    if (!window.confirm(`Delete "${item.name}" and every amount entered for it? Its one-off purchases stay in the category. Archive it instead to keep history.`)) return;
+    if (!window.confirm(`Delete "${item.name}" and every amount entered for it? Its entries stay in the category. Archive it instead to keep history.`)) return;
     setBusy(true);
     const { error: err } = await supabase.from("line_items").delete().eq("id", item.id);
     setBusy(false);
