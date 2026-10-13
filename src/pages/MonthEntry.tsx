@@ -7,6 +7,7 @@ import { FormError } from "@/components/ui/form-message";
 import { AmountInput } from "@/components/AmountInput";
 import { useCellSaver } from "@/hooks/useCellSaver";
 import { BudgetBar } from "@/components/BudgetBar";
+import { CardActivity } from "@/components/CardActivity";
 import { CardTransactionsDialog } from "@/components/CardTransactions";
 import { EmptyBudget } from "@/components/EmptyBudget";
 import { OneOffDialog } from "@/components/OneOffDialog";
@@ -35,13 +36,12 @@ import {
   summarizeMonth,
   sumMoney,
   totalForCategoryMonth,
-  uncategorizedCard,
   type Ledger,
   type LineItem,
   type MonthlyAmount,
   type OneOff,
 } from "@/lib/budget";
-import type { Transaction } from "@/lib/transactions";
+import { formatDay, type Transaction } from "@/lib/transactions";
 import { cn } from "@/lib/utils";
 
 type EditingOneOff = { oneOff: OneOff | null; category_id?: string | null; line_item_id?: string | null } | null;
@@ -80,7 +80,6 @@ export function MonthEntry() {
   const summary = summarizeMonth(ledger, month);
   const prevSummary = summarizeMonth(ledger, addMonths(month, -1));
   const monthOneOffs = oneOffs.filter((o) => o.month === month);
-  const unfiled = uncategorizedCard(ledger, month);
 
   // Items paid by card this month don't get a typed suggestion (it would count twice)
   const pendingSuggestions = activeItems
@@ -131,7 +130,7 @@ export function MonthEntry() {
           prevLabel="Previous month"
           nextLabel="Next month"
         />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setEditingOneOff({ oneOff: null })}>
             <Plus /> Entry
           </Button>
@@ -193,35 +192,16 @@ export function MonthEntry() {
             </CardContent>
           </Card>
 
-          {unfiled.length > 0 && (
-            <Card className="border-[var(--color-warning)]">
-              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-                <p className="flex min-w-0 flex-1 items-center gap-2 text-sm">
-                  <AlertTriangle className="h-4 w-4 shrink-0 text-[var(--color-warning)]" aria-hidden />
-                  <span>
-                    {unfiled.length} card {unfiled.length === 1 ? "charge isn't" : "charges aren't"} filed under a line
-                    item ({formatMoney(sumMoney(unfiled.map((t) => t.amount)), true)}).{" "}
-                    {unfiled.length === 1 ? "It counts" : "They count"} as uncategorized spending until you file{" "}
-                    {unfiled.length === 1 ? "it" : "them"}.
-                  </span>
-                </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    setCardDialog({
-                      title: `Unfiled card charges · ${formatMonth(month)}`,
-                      description:
-                        "Pick a line item for each. If you already added a purchase as an entry, link it so it isn't counted twice. Choose “Don't count” for anything that isn't household spending.",
-                      ids: new Set(unfiled.map((t) => t.id)),
-                    })
-                  }
-                >
-                  Review
-                </Button>
-              </CardContent>
-            </Card>
-          )}
+          <CardActivity
+            month={month}
+            transactions={transactions}
+            categories={categories}
+            items={items}
+            oneOffs={oneOffs}
+            onOpenCharges={(title, description, charges) =>
+              setCardDialog({ title, description, ids: new Set(charges.map((t) => t.id)) })
+            }
+          />
         </>
       )}
 
@@ -406,6 +386,8 @@ function AmountRow({
   const note = ledger.notes.get(item.id)?.get(month) ?? "";
   const linked = itemOneOffs(ledger, item.id, month);
   const card = itemCard(ledger, item.id, month);
+  const cardTotal = sumMoney(card.map((t) => t.amount));
+  const [showCard, setShowCard] = useState(false);
   const suggestion = value === undefined && !card.length ? suggestedAmount(item, month, idx) : null;
   const saver = useCellSaver(item.id, month, value, onSaved);
   const [noteOpen, setNoteOpen] = useState(false);
@@ -476,7 +458,23 @@ function AmountRow({
             <MessageSquare className={cn(note && "fill-current")} />
           </Button>
         )}
-        <AmountInput id={inputId} value={value} saver={saver} onEnter={onEnter} />
+        {card.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowCard((v) => !v)}
+            aria-expanded={showCard}
+            aria-label={`${formatMoney(cardTotal, true)} from ${card.length} Amex ${card.length === 1 ? "charge" : "charges"}; ${showCard ? "hide" : "show"} them`}
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-muted)]/50 px-2 text-sm tabular-nums hover:bg-[var(--color-accent)]"
+            title="Amex charges in this line"
+          >
+            <CreditCard className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" aria-hidden />
+            {formatMoney(cardTotal, true)}
+            <span className="rounded bg-[var(--color-card)] px-1 text-[10px] font-semibold text-[var(--color-muted-foreground)]">
+              {card.length}
+            </span>
+          </button>
+        )}
+        <AmountInput id={inputId} value={value} saver={saver} onEnter={onEnter} covered={card.length > 0} />
       </div>
       {note && !noteOpen && (
         <p className="w-full text-right text-xs text-[var(--color-muted-foreground)]">“{note}”</p>
@@ -501,21 +499,47 @@ function AmountRow({
           />
         </div>
       )}
-      {(linked.length > 0 || card.length > 0) && (
+      {showCard && card.length > 0 && (
+        <div className="w-full rounded-md border border-[var(--color-border)] text-sm">
+          <ul className="divide-y divide-[var(--color-border)]">
+            {[...card]
+              .sort((a, b) => b.posted_on.localeCompare(a.posted_on))
+              .map((t) => (
+                <li key={t.id} className="flex items-center gap-3 px-3 py-1.5">
+                  <span className="w-10 shrink-0 text-xs tabular-nums text-[var(--color-muted-foreground)]">
+                    {formatDay(t.posted_on)}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{t.merchant}</span>
+                  <span
+                    className={cn(
+                      "tabular-nums",
+                      t.amount < 0 ? "text-[var(--color-success)]" : "text-[var(--color-foreground)]"
+                    )}
+                  >
+                    {formatMoney(t.amount, true)}
+                  </span>
+                </li>
+              ))}
+          </ul>
+          <div className="border-t border-[var(--color-border)] px-1 py-0.5">
+            <Button variant="ghost" size="sm" className="text-[var(--color-primary)]" onClick={() => onShowCard(card)}>
+              Move charges to another line…
+            </Button>
+          </div>
+        </div>
+      )}
+      {linked.length > 0 && (
         <div className="w-full space-y-0.5 text-right text-xs text-[var(--color-muted-foreground)]">
-          {card.length > 0 && (
-            <button type="button" className="inline-flex w-full items-center justify-end gap-1 hover:underline" onClick={() => onShowCard(card)}>
-              <CreditCard className="h-3 w-3" aria-hidden />+ {formatMoney(sumMoney(card.map((t) => t.amount)), true)} Amex (
-              {card.length} {card.length === 1 ? "charge" : "charges"})
-            </button>
-          )}
           {linked.map((o) => (
             <button key={o.id} type="button" className="block w-full text-right hover:underline" onClick={() => onEditOneOff(o)}>
               + {formatMoney(o.amount, true)} {o.name}
             </button>
           ))}
-          <p className="font-medium text-[var(--color-foreground)]">Total {formatMoney(total, true)}</p>
         </div>
+      )}
+      {/* A total only helps when the line adds up more than one thing */}
+      {[value !== undefined, card.length > 0, linked.length > 0].filter(Boolean).length > 1 && (
+        <p className="w-full text-right text-xs font-medium">Total {formatMoney(total, true)}</p>
       )}
       {item.monthly_budget != null && (
         <BudgetBar spent={total} budget={item.monthly_budget} className="w-full" />

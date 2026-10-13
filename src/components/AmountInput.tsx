@@ -16,6 +16,7 @@ export function AmountInput({
   ariaLabel,
   compact = false,
   dataAttrs,
+  covered = false,
 }: {
   id?: string;
   value: number | undefined;
@@ -24,6 +25,8 @@ export function AmountInput({
   ariaLabel?: string;
   compact?: boolean;
   dataAttrs?: Record<string, string | number>;
+  /** The line already has money from elsewhere (card charges): don't look "not entered" */
+  covered?: boolean;
 }) {
   const [text, setText] = useState(value === undefined ? "" : String(value));
   const [isFocused, setIsFocused] = useState(false);
@@ -59,10 +62,10 @@ export function AmountInput({
             ? "h-8 w-[4.25rem] px-1 pr-3.5 text-sm"
             : "h-9 w-32 pl-6 pr-7 text-base md:text-sm",
           state === "error" ? "border-[var(--color-destructive)]" : "border-[var(--color-input)]",
-          value === undefined && "border-dashed",
+          value === undefined && !covered && "border-dashed",
           compact && value !== undefined && state !== "error" && "border-transparent hover:border-[var(--color-input)]"
         )}
-        placeholder={compact ? "" : "—"}
+        placeholder={compact ? "" : covered ? "+ more" : "—"}
         // In the grid, show "4,700" while not editing; raw digits while editing
         value={compact && !isFocused && text !== "" && !Number.isNaN(Number(text)) ? formatPlain(Number(text)) : text}
         onFocus={(e) => {
