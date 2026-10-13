@@ -7,9 +7,20 @@ import { FormError } from "@/components/ui/form-message";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { addMonths, currentMonthKey, formatMoney, formatMonth, parseAmount, sumMoney, type Category, type LineItem } from "@/lib/budget";
 import {
-  activeIn,
+  addMonths,
+  currentMonthKey,
+  formatMoney,
+  formatMonth,
+  KIND_LABEL,
+  parseAmount,
+  sumMoney,
+  type Category,
+  type CategoryKind,
+  type LineItem,
+  type OneOff,
+} from "@/lib/budget";
+import {
   removeRecurring,
   restartRecurring,
   stopRecurring,
@@ -20,13 +31,16 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * The Month page's "Recurring" card: every recurring entry that covers this month, with its
- * amount and since/until, plus stopped ones to restart. Each opens a dialog to change it from
- * this month on (or every month), skip this month, or stop it.
+ * The Month page's "Recurring" card: a breakdown of what recurring entries bring into this
+ * month, grouped into income / spending / savings with subtotals, each with its amount this
+ * month and what changed since last month (new, amount changed, edited for this month,
+ * skipped, ended). Stopped ones can be restarted. Each opens a dialog to change it from this
+ * month on (or every month), skip this month, or stop it.
  */
 export function RecurringPanel({
   month,
   recurring,
+  oneOffs,
   categories,
   items,
   onAdd,
@@ -34,6 +48,8 @@ export function RecurringPanel({
 }: {
   month: string;
   recurring: RecurringEntry[];
+  /** Manual entries loaded for this month and the month before (to show actual amounts and changes) */
+  oneOffs: OneOff[];
   categories: Category[];
   items: LineItem[];
   onAdd: () => void;
@@ -43,14 +59,42 @@ export function RecurringPanel({
   const [showStopped, setShowStopped] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const prevMonth = addMonths(month, -1);
+  const isFuture = month > currentMonthKey();
   const active = recurring.filter((r) => r.start_month <= month && (r.end_month === null || month <= r.end_month));
   const stopped = recurring.filter((r) => r.end_month !== null && r.end_month < month);
+  const endedLastMonth = stopped.filter((r) => r.end_month === prevMonth);
   const upcoming = recurring.filter((r) => r.start_month > month);
-  const monthly = sumMoney(active.filter((r) => activeIn(r, month)).map((r) => r.amount));
+  const catById = new Map(categories.map((c) => [c.id, c]));
   const where = (r: RecurringEntry) =>
-    [categories.find((c) => c.id === r.category_id)?.name, items.find((i) => i.id === r.line_item_id)?.name]
-      .filter(Boolean)
-      .join(" › ");
+    [catById.get(r.category_id)?.name, items.find((i) => i.id === r.line_item_id)?.name].filter(Boolean).join(" › ");
+  const occurrence = (r: RecurringEntry, m: string) => oneOffs.find((o) => o.recurring_id === r.id && o.month === m);
+
+  /** What this entry brings into the month, and how that compares with last month */
+  const lines = active.map((r) => {
+    const skipped = r.skip_months.includes(month);
+    const occ = occurrence(r, month);
+    // Past and current months have a real entry; future months show what will come in
+    const amount = skipped ? 0 : (occ?.amount ?? (isFuture ? r.amount : 0));
+    const prev = occurrence(r, prevMonth)?.amount;
+    const notes: string[] = [];
+    if (skipped) notes.push(`skipped in ${formatMonth(month, "short")}`);
+    else if (r.start_month === month) notes.push("new this month");
+    else if (prev === undefined && r.start_month <= prevMonth) notes.push(`skipped in ${formatMonth(prevMonth, "short")}`);
+    else if (prev !== undefined && prev !== amount) {
+      const d = amount - prev;
+      notes.push(`${d > 0 ? "up" : "down"} ${formatMoney(Math.abs(d), true)} from ${formatMoney(prev, true)} in ${formatMonth(prevMonth, "short")}`);
+    }
+    if (occ && occ.amount !== r.amount && !skipped) notes.push(`usually ${formatMoney(r.amount, true)}`);
+    if (r.end_month === month) notes.push(`last month: stops after ${formatMonth(month, "short")}`);
+    return { r, amount, skipped, notes, kind: catById.get(r.category_id)?.kind ?? ("expense" as CategoryKind) };
+  });
+  const groups = (["income", "expense", "savings"] as const)
+    .map((kind) => ({ kind, lines: lines.filter((l) => l.kind === kind) }))
+    .filter((g) => g.lines.length > 0)
+    .map((g) => ({ ...g, total: sumMoney(g.lines.map((l) => l.amount)) }));
+  const totalOf = (kind: CategoryKind) => groups.find((g) => g.kind === kind)?.total ?? 0;
+  const net = sumMoney([totalOf("income"), -totalOf("expense"), -totalOf("savings")]);
 
   async function restart(r: RecurringEntry) {
     setError(null);
@@ -62,7 +106,7 @@ export function RecurringPanel({
     }
   }
 
-  const row = (r: RecurringEntry, extra: React.ReactNode, muted = false) => (
+  const row = (r: RecurringEntry, amount: number, notes: string[], muted = false) => (
     <li key={r.id}>
       <button
         type="button"
@@ -74,11 +118,17 @@ export function RecurringPanel({
         <span className="min-w-0 flex-1">
           <span className={cn("block truncate font-medium", muted && "text-[var(--color-muted-foreground)]")}>{r.name}</span>
           <span className="block truncate text-xs text-[var(--color-muted-foreground)]">
-            {[where(r), extra].filter(Boolean).join(" · ")}
+            {where(r)}
+            {notes.map((n) => (
+              <span key={n} className={cn(/^(new|up|down|skipped|last)/.test(n) && "font-medium text-[var(--color-foreground)]")}>
+                {" · "}
+                {n}
+              </span>
+            ))}
           </span>
         </span>
-        <span className={cn("font-medium tabular-nums", muted && "text-[var(--color-muted-foreground)]")}>
-          {formatMoney(r.amount, true)}
+        <span className={cn("font-medium tabular-nums", muted && "text-[var(--color-muted-foreground)] line-through")}>
+          {formatMoney(muted ? r.amount : amount, true)}
         </span>
       </button>
     </li>
@@ -86,33 +136,70 @@ export function RecurringPanel({
 
   return (
     <Card>
-      <div className="flex items-baseline justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3">
-        <h2 className="flex items-center gap-2 font-semibold">
-          <Repeat className="h-4 w-4" aria-hidden /> Recurring
-        </h2>
-        {active.length > 0 && (
-          <span className="text-sm text-[var(--color-muted-foreground)]">
-            <span className="font-medium tabular-nums text-[var(--color-foreground)]">{formatMoney(monthly)}</span> this month
-          </span>
+      <div className="space-y-2 border-b border-[var(--color-border)] px-4 py-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="flex items-center gap-2 font-semibold">
+            <Repeat className="h-4 w-4" aria-hidden /> Recurring
+          </h2>
+          {lines.length > 0 && (
+            <span className="text-xs text-[var(--color-muted-foreground)]">
+              {isFuture ? `Coming in on ${formatMonth(month, "short")}` : `Brought into ${formatMonth(month, "short")}`}
+            </span>
+          )}
+        </div>
+        {groups.length > 0 && (
+          <dl className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+            {groups.map((g) => (
+              <div key={g.kind} className="flex items-baseline gap-1.5">
+                <dt className="text-[var(--color-muted-foreground)]">{KIND_LABEL[g.kind]}</dt>
+                <dd className="font-medium tabular-nums">{formatMoney(g.total)}</dd>
+              </div>
+            ))}
+            {groups.length > 1 && (
+              <div className="flex items-baseline gap-1.5">
+                <dt className="text-[var(--color-muted-foreground)]">Left over</dt>
+                <dd className={cn("font-semibold tabular-nums", net < 0 && "text-[var(--color-destructive)]")}>{formatMoney(net)}</dd>
+              </div>
+            )}
+          </dl>
         )}
       </div>
-      {active.length === 0 && upcoming.length === 0 && (
+      {lines.length === 0 && upcoming.length === 0 && (
         <p className="px-4 py-3 text-sm text-[var(--color-muted-foreground)]">
           Nothing recurring yet. Add rent, wages or subscriptions once and they're filled in every month.
         </p>
       )}
-      <ul className="divide-y divide-[var(--color-border)] empty:hidden">
-        {active.map((r) =>
-          row(
-            r,
-            r.skip_months.includes(month)
-              ? `skipped in ${formatMonth(month, "short")}`
-              : `since ${formatMonth(r.start_month, "short")}${r.end_month ? ` until ${formatMonth(r.end_month, "short")}` : ""}`,
-            r.skip_months.includes(month)
-          )
-        )}
-        {upcoming.map((r) => row(r, `starts ${formatMonth(r.start_month, "short")}`, true))}
-      </ul>
+      {groups.map((g) => (
+        <div key={g.kind} className="border-b border-[var(--color-border)] last:border-b-0">
+          <div className="flex items-baseline justify-between bg-[var(--color-muted)]/50 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">
+            <span>
+              {KIND_LABEL[g.kind]} ({g.lines.length})
+            </span>
+            <span className="tabular-nums">{formatMoney(g.total, true)}</span>
+          </div>
+          <ul className="divide-y divide-[var(--color-border)]">
+            {[...g.lines].sort((a, b) => b.amount - a.amount).map((l) => row(l.r, l.amount, l.notes, l.skipped))}
+          </ul>
+        </div>
+      ))}
+      {endedLastMonth.length > 0 && (
+        <div className="border-t border-[var(--color-border)]">
+          <p className="px-4 pt-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">
+            Not coming in anymore
+          </p>
+          <ul className="divide-y divide-[var(--color-border)]">
+            {endedLastMonth.map((r) => row(r, 0, [`stopped after ${formatMonth(prevMonth, "short")}`], true))}
+          </ul>
+        </div>
+      )}
+      {upcoming.length > 0 && (
+        <div className="border-t border-[var(--color-border)]">
+          <p className="px-4 pt-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">Starting later</p>
+          <ul className="divide-y divide-[var(--color-border)]">
+            {upcoming.map((r) => row(r, r.amount, [`starts ${formatMonth(r.start_month, "short")}`]))}
+          </ul>
+        </div>
+      )}
       {stopped.length > 0 && (
         <div className="border-t border-[var(--color-border)]">
           <button

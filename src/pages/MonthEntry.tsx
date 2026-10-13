@@ -147,6 +147,7 @@ export function MonthEntry() {
           <RecurringPanel
             month={month}
             recurring={recurring}
+            oneOffs={oneOffs}
             categories={categories}
             items={items}
             onAdd={() => setEditingOneOff({ oneOff: null, startRecurring: true })}
