@@ -1,4 +1,5 @@
 import {
+  categoryCard,
   categoryOneOffs,
   formatMonth,
   itemMonthTotal,
@@ -49,6 +50,14 @@ export async function exportYear(year: number, L: Ledger): Promise<void> {
     const catOneOffs = months.flatMap((m) => categoryOneOffs(L, cat.id, m));
     for (const [name, list] of groupByName(catOneOffs)) {
       lines.push({ name, values: months.map((m) => sumOrNull(list.filter((o) => o.month === m))) });
+    }
+    // Card charges filed to the category without a specific line
+    const catCard = months.map((m) => categoryCard(L, cat.id, m));
+    if (catCard.some((l) => l.length)) {
+      lines.push({
+        name: "Card charges (no line)",
+        values: catCard.map((l) => (l.length ? sumMoney(l.map((t) => t.amount)) : null)),
+      });
     }
     const hasAny = lines.some((l) => l.values.some((v) => v !== null));
     if (cat.archived && !hasAny) continue;
@@ -110,7 +119,9 @@ export async function exportYear(year: number, L: Ledger): Promise<void> {
         ? `Entry: ${oneOffName.get(t.one_off_id) ?? "(other month)"}`
         : item
           ? `${catName.get(item.category_id) ?? ""} › ${item.name}`
-          : "Uncategorized";
+          : t.category_id && catName.has(t.category_id)
+            ? `${catName.get(t.category_id)} (no specific line)`
+            : "Uncategorized";
     cardRows.push([t.posted_on, t.merchant, t.amount, t.card_member ?? "", countedAs, t.source_category ?? "", t.description]);
   }
   const cardSheet = XLSX.utils.aoa_to_sheet(cardRows);

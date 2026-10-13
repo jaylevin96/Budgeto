@@ -14,7 +14,9 @@ export type Transaction = {
   /** Charges positive, credits negative */
   amount: number;
   line_item_id: string | null;
-  /** Covered by this one-off: the one-off's amount counts instead */
+  /** Filed to a category without a specific line item (ignored when line_item_id is set) */
+  category_id: string | null;
+  /** Covered by this entry (one-off): the entry's amount counts instead */
   one_off_id: string | null;
   excluded: boolean;
 };
@@ -35,32 +37,46 @@ export type ImportRecord = {
 export const countsOnItsOwn = (t: Pick<Transaction, "excluded" | "one_off_id">) => !t.excluded && !t.one_off_id;
 
 // ---------- Where a charge goes, as one <select> value ----------
-// ""            uncategorized (counted as uncategorized spending)
-// "exclude"     don't count
-// "oneoff:<id>" already entered as that one-off
-// "<item id>"   that line item
+// ""              uncategorized (counted as uncategorized spending)
+// "exclude"       don't count
+// "oneoff:<id>"   already added as that entry
+// "category:<id>" that category, no specific line item
+// "<item id>"     that line item
 
 export const EXCLUDE = "exclude";
 const ONE_OFF = "oneoff:";
+const CATEGORY = "category:";
 
-export type Destination = { line_item_id: string | null; one_off_id: string | null; excluded: boolean };
+export type Destination = {
+  line_item_id: string | null;
+  category_id: string | null;
+  one_off_id: string | null;
+  excluded: boolean;
+};
+
+const nowhere: Destination = { line_item_id: null, category_id: null, one_off_id: null, excluded: false };
 
 export function destinationValue(d: Destination): string {
   if (d.excluded) return EXCLUDE;
   if (d.one_off_id) return ONE_OFF + d.one_off_id;
-  return d.line_item_id ?? "";
+  if (d.line_item_id) return d.line_item_id;
+  if (d.category_id) return CATEGORY + d.category_id;
+  return "";
 }
 
 export function parseDestination(value: string): Destination {
-  if (value === EXCLUDE) return { line_item_id: null, one_off_id: null, excluded: true };
-  if (value.startsWith(ONE_OFF)) return { line_item_id: null, one_off_id: value.slice(ONE_OFF.length), excluded: false };
-  return { line_item_id: value || null, one_off_id: null, excluded: false };
+  if (value === EXCLUDE) return { ...nowhere, excluded: true };
+  if (value.startsWith(ONE_OFF)) return { ...nowhere, one_off_id: value.slice(ONE_OFF.length) };
+  if (value.startsWith(CATEGORY)) return { ...nowhere, category_id: value.slice(CATEGORY.length) };
+  return { ...nowhere, line_item_id: value || null };
 }
+
+export const categoryValue = (categoryId: string) => CATEGORY + categoryId;
 
 // ---------- Data access ----------
 
 const TX_COLUMNS =
-  "id, import_id, posted_on, month, description, merchant, card_member, source_category, amount, line_item_id, one_off_id, excluded";
+  "id, import_id, posted_on, month, description, merchant, card_member, source_category, amount, line_item_id, category_id, one_off_id, excluded";
 const IMPORT_COLUMNS = "id, source, account_label, period_start, period_end, file_name, row_count, total, created_at";
 
 const toTx = (t: Transaction): Transaction => ({ ...t, amount: Number(t.amount) });
@@ -99,8 +115,9 @@ export async function fetchRules(): Promise<Rule[]> {
 }
 
 /**
- * Remember "always file this merchant here" or "never count it". Linking to a one-off is
- * specific to one purchase, so it isn't remembered; neither is "uncategorized".
+ * Remember "always file this merchant here" or "never count it". Linking to an entry is
+ * specific to one purchase, so it isn't remembered; neither are "uncategorized" and a category
+ * without a line item (rules point at line items).
  */
 export async function saveMerchantRules(rules: { merchant: string; destination: Destination }[]) {
   const latest = new Map<string, Destination>();
@@ -174,6 +191,7 @@ export async function saveStatement(
       source_category: row.sourceCategory,
       amount: row.amount,
       line_item_id: d.one_off_id || d.excluded ? null : d.line_item_id,
+      category_id: d.one_off_id || d.excluded ? null : d.category_id,
       one_off_id: d.one_off_id,
       excluded: d.excluded,
     }));

@@ -326,11 +326,11 @@ function bucket<T>(map: MonthBuckets<T>, key: string, month: string, value: T) {
 }
 
 /**
- * Everything needed to total a month: typed cells, one-offs and card charges.
- * One-offs tied to a line item add to that item; tied only to a category they form
- * that category's "One-offs" row; untied ones are "Uncategorized" spending.
- * Card charges filed under a line item add to that item; unfiled ones are "Uncategorized"
- * spending; excluded ones and ones covered by a one-off don't count on their own.
+ * Everything needed to total a month: typed cells, entries (one-offs) and card charges.
+ * Entries and card charges follow the same rule: tied to a line item they add to that item;
+ * tied only to a category they form that category's "Entries" row; untied ones are
+ * "Uncategorized" spending. Card charges that are excluded or covered by an entry don't
+ * count on their own.
  */
 export type Ledger = {
   categories: Category[];
@@ -349,6 +349,8 @@ export type Ledger = {
   transactions: Transaction[];
   /** Counted card charges filed under a line item */
   cardByItem: MonthBuckets<Transaction>;
+  /** Counted card charges filed to a category without a line item */
+  cardByCategory: MonthBuckets<Transaction>;
   /** month → counted card charges not filed anywhere yet */
   cardUncategorized: Map<string, Transaction[]>;
   kindByCategory: Map<string, CategoryKind>;
@@ -379,10 +381,12 @@ export function buildLedger(
     else uncategorized.set(o.month, [...(uncategorized.get(o.month) ?? []), o]);
   }
   const cardByItem: MonthBuckets<Transaction> = new Map();
+  const cardByCategory: MonthBuckets<Transaction> = new Map();
   const cardUncategorized = new Map<string, Transaction[]>();
   for (const t of transactions) {
     if (!countsOnItsOwn(t)) continue;
     if (t.line_item_id && itemIds.has(t.line_item_id)) bucket(cardByItem, t.line_item_id, t.month, t);
+    else if (t.category_id && catIds.has(t.category_id)) bucket(cardByCategory, t.category_id, t.month, t);
     else cardUncategorized.set(t.month, [...(cardUncategorized.get(t.month) ?? []), t]);
   }
   return {
@@ -396,6 +400,7 @@ export function buildLedger(
     uncategorized,
     transactions,
     cardByItem,
+    cardByCategory,
     cardUncategorized,
     kindByCategory: new Map(categories.map((c) => [c.id, c.kind])),
   };
@@ -413,6 +418,11 @@ export function categoryOneOffs(L: Ledger, categoryId: string, month: string): O
 
 export function itemCard(L: Ledger, itemId: string, month: string): Transaction[] {
   return L.cardByItem.get(itemId)?.get(month) ?? [];
+}
+
+/** Card charges filed to the category itself (no line item) */
+export function categoryCard(L: Ledger, categoryId: string, month: string): Transaction[] {
+  return L.cardByCategory.get(categoryId)?.get(month) ?? [];
 }
 
 export function uncategorizedCard(L: Ledger, month: string): Transaction[] {
@@ -439,14 +449,24 @@ export function totalForCategoryMonth(L: Ledger, categoryId: string, month: stri
   return sumMoney([
     ...L.items.filter((i) => i.category_id === categoryId).map((i) => itemMonthTotal(L, i.id, month) ?? 0),
     sumOneOffs(categoryOneOffs(L, categoryId, month)),
+    sumCard(categoryCard(L, categoryId, month)),
   ]);
 }
 
-/** Whether a category has anything (typed or one-off) in a month */
+/** The category's own "Entries" row: category-only entries plus card charges filed to it */
+export function categoryEntriesTotal(L: Ledger, categoryId: string, month: string): number {
+  return sumMoney([sumOneOffs(categoryOneOffs(L, categoryId, month)), sumCard(categoryCard(L, categoryId, month))]);
+}
+
+export function categoryHasEntries(L: Ledger, categoryId: string, month: string): boolean {
+  return categoryOneOffs(L, categoryId, month).length > 0 || categoryCard(L, categoryId, month).length > 0;
+}
+
+/** Whether a category has anything (typed, entries or card charges) in a month */
 export function categoryHasData(L: Ledger, categoryId: string, month: string): boolean {
   return (
     L.items.some((i) => i.category_id === categoryId && itemMonthTotal(L, i.id, month) !== undefined) ||
-    categoryOneOffs(L, categoryId, month).length > 0
+    categoryHasEntries(L, categoryId, month)
   );
 }
 
@@ -487,6 +507,10 @@ export function summarizeMonth(L: Ledger, month: string): MonthSummary {
     const kind = L.kindByCategory.get(catId);
     if (kind) totals[kind].push(sumOneOffs(byMonth.get(month)));
   }
+  for (const [catId, byMonth] of L.cardByCategory) {
+    const kind = L.kindByCategory.get(catId);
+    if (kind) totals[kind].push(sumCard(byMonth.get(month)));
+  }
   totals.expense.push(uncategorizedTotal(L, month));
   const monthOneOffs = L.oneOffs.filter((o) => o.month === month);
   const income = sumMoney(totals.income);
@@ -500,7 +524,7 @@ export function summarizeMonth(L: Ledger, month: string): MonthSummary {
     net: sumMoney([income, -spending, -savings]),
     entered,
     oneOffs: sumOneOffs(monthOneOffs),
-    hasData: entered > 0 || monthOneOffs.length > 0 || uncategorizedCard(L, month).length > 0,
+    hasData: entered > 0 || monthOneOffs.length > 0 || L.transactions.some((t) => t.month === month && countsOnItsOwn(t)),
   };
 }
 

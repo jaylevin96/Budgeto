@@ -14,6 +14,7 @@ import {
   type OneOff,
 } from "@/lib/budget";
 import {
+  categoryValue,
   destinationValue,
   EXCLUDE,
   formatDay,
@@ -28,8 +29,8 @@ const NEW_ITEM = "__new_item";
 const NEW_CATEGORY = "__new_category";
 
 /**
- * Where a card charge goes: a line item, one of the month's one-offs ("already entered"),
- * uncategorized, or "don't count". With `onCreated`, it also offers "+ New category…" and
+ * Where a card charge goes: a line item, a category without a specific line, one of the
+ * month's entries ("already added"), uncategorized, or "don't count". With `onCreated`, it also offers "+ New category…" and
  * "+ New line item…" near the top, which create the destination and then pick it.
  */
 export function DestinationSelect({
@@ -74,6 +75,7 @@ export function DestinationSelect({
           .filter((c) => !c.archived)
           .map((c) => (
             <optgroup key={c.id} label={c.name}>
+              <option value={categoryValue(c.id)}>{c.name} (no specific line)</option>
               {items
                 .filter((i) => i.category_id === c.id && (!i.archived || i.id === value))
                 .map((i) => (
@@ -86,7 +88,7 @@ export function DestinationSelect({
         {oneOffs.length > 0 && (
           <optgroup label="Already added as an entry">
             {oneOffs.map((o) => (
-              <option key={o.id} value={destinationValue({ line_item_id: null, one_off_id: o.id, excluded: false })}>
+              <option key={o.id} value={destinationValue({ line_item_id: null, category_id: null, one_off_id: o.id, excluded: false })}>
                 {o.name} ({formatMoney(o.amount)})
               </option>
             ))}
@@ -249,10 +251,11 @@ export function CardTransactionList({
     setSavingId(t.id);
     setError(null);
     try {
-      // "Remember" also files this merchant's other unfiled charges in the list (not for one-off links)
+      // "Remember" also files this merchant's other unfiled charges in the list (not for entry links)
+      const unfiled = (o: Transaction) => !o.line_item_id && !o.category_id && !o.one_off_id && !o.excluded;
       const siblings =
         remember && !d.one_off_id
-          ? transactions.filter((o) => o.id !== t.id && o.merchant === t.merchant && !o.line_item_id && !o.one_off_id && !o.excluded)
+          ? transactions.filter((o) => o.id !== t.id && o.merchant === t.merchant && unfiled(o))
           : [];
       const updated = await updateTransactions([t.id, ...siblings.map((o) => o.id)], d);
       if (remember) await saveMerchantRules([{ merchant: t.merchant, destination: d }]);

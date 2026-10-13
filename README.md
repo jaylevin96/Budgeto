@@ -10,7 +10,7 @@ Same stack as Tracko: Vite + React 19 + TypeScript, Tailwind v4 + shadcn/ui, Sup
 - **Line items** (Rent, Comed, Jay Wage, …) are the rows. Each one is *fixed* (same amount monthly), *monthly, amount varies* (utilities) or *occasional*.
 - **Monthly amounts**: one total per line item per month, just like a spreadsheet cell. An empty cell means "not entered yet"; `0` means "nothing this month".
 - **Entries** ("Hotel $500", "Snorkel tour $120") are itemized amounts you add by hand, each with a name and a month. Tie one to a line item and it adds to that item's month; tie it to just a category and it shows in that category's "Entries" row; leave it untied and it counts as uncategorized spending. (Stored in the `one_offs` table; they were called one-offs before.)
-- **Amex charges**, imported monthly from the statement download, add on top of what's typed. Each charge counts once: filed under a line item (adds to that cell), unfiled (counts as uncategorized spending until filed), linked to an entry you already added by hand (the entry counts instead), or "don't count" (card payments). Merchant choices are remembered, so later months mostly file themselves. See [`docs/AMEX_IMPORT.md`](docs/AMEX_IMPORT.md).
+- **Amex charges**, imported monthly from the statement download, add on top of what's typed. Each charge counts once, following the same rule as entries: filed under a line item (adds to that cell), filed to a category with no specific line (shows in that category's Entries row), unfiled (counts as uncategorized spending until filed), linked to an entry you already added by hand (the entry counts instead), or "don't count" (card payments). Merchant choices are remembered, so later months mostly file themselves. See [`docs/AMEX_IMPORT.md`](docs/AMEX_IMPORT.md).
 - **Budgets** (optional): a monthly target on any category or line item, shown as budget vs actual.
 - **Notes**: any entered cell can carry a note (e.g. "AC ran all month").
 - **Left over** = income − spending − savings, calculated per month (entries and card charges included).
@@ -37,6 +37,7 @@ The Supabase project is shared with Tracko and Resybot, so every Budgeto object 
    - `20261013000000_budgeto_schema.sql` (categories, line items, monthly amounts)
    - `20261020000000_one_offs_budgets.sql` (one-off purchases and monthly budgets)
    - `20261021000000_card_import.sql` (Amex import: imports, transactions, merchant rules)
+   - `20261022000000_card_category.sql` (lets a card charge be filed to a category without a specific line item)
 2. Go to **Project Settings → Data API → Exposed schemas** and add `budgeto`. Without this step, API calls fail with "schema must be one of the following".
 
 Run migrations from the SQL editor rather than `supabase db push`. The project's migration history also contains Tracko's migrations, which this repo doesn't have.
@@ -73,5 +74,5 @@ On americanexpress.com open **Statements & Activity**, choose the statement and 
    To add the ones in bold in one go, run [`supabase/scripts/add_amex_line_items.sql`](supabase/scripts/add_amex_line_items.sql) in the SQL Editor (after the migrations). It skips any you already have, under any of the accepted names, and is safe to run again. Or add them under **Settings**. Card payments are left out automatically, and "Amex Split" credits from friends reduce the meal they paid back.
 3. If you already added a purchase as an entry, the matching charge(s) are linked to it so it isn't counted twice. (Entries are only ever added by hand; the import doesn't create them.)
 4. A warning appears when a charge lands on a line that already has a typed amount that month (e.g. Netflix typed by hand *and* on the card). Choose **Don't count** or clear the typed amount.
-5. If nothing fits, pick **+ New category…** or **+ New line item…** (right under "Uncategorized" in the dropdown) to create it on the spot. A new category needs no separate line item name; it gets one with the same name. This works on the review screen and wherever you refile charges later.
+5. If nothing fits, pick **+ New category…** or **+ New line item…** (right under "Uncategorized" in the dropdown) to create it on the spot. A new category needs no separate line item name; it gets one with the same name. This works on the review screen and wherever you refile charges later. To file a charge to a category without picking a line, choose **{Category} (no specific line)** at the top of that category's group.
 6. Click **Import**. Anything left uncategorized still counts as spending, under **Uncategorized** (it isn't put into an "Other" line), and shows as a "Review" banner on that Month page until you file it.

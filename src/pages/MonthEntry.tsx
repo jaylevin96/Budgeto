@@ -17,6 +17,7 @@ import { useBudget } from "@/hooks/useBudget";
 import {
   addMonths,
   anomalyHint,
+  categoryCard,
   categoryOneOffs,
   currentMonthKey,
   formatMoney,
@@ -232,6 +233,7 @@ export function MonthEntry() {
             const catItems = activeItems.filter((i) => i.category_id === cat.id);
             const visible = onlyMissing ? catItems.filter((i) => !itemEntered(ledger, i.id, month)) : catItems;
             const catOneOffs = categoryOneOffs(ledger, cat.id, month);
+            const catCard = categoryCard(ledger, cat.id, month);
             if (onlyMissing && !visible.length) return null;
             const subtotal = totalForCategoryMonth(ledger, cat.id, month);
             return (
@@ -270,7 +272,7 @@ export function MonthEntry() {
                     />
                   ))}
                 </ul>
-                {catOneOffs.length > 0 && !onlyMissing && (
+                {catOneOffs.length + catCard.length > 0 && !onlyMissing && (
                   <div className="border-t border-[var(--color-border)]">
                     <p className="px-4 pt-2 text-xs font-medium text-[var(--color-muted-foreground)]">Entries</p>
                     <OneOffList
@@ -280,10 +282,29 @@ export function MonthEntry() {
                       showTarget={false}
                       onEdit={(o) => setEditingOneOff({ oneOff: o })}
                     />
+                    {catCard.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCardDialog({
+                            title: `${cat.name} · ${formatMonth(month)}`,
+                            description: "Card charges filed to this category without a specific line. Move any that belong elsewhere.",
+                            ids: new Set(catCard.map((t) => t.id)),
+                          })
+                        }
+                        className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--color-accent)]"
+                      >
+                        <CreditCard className="h-4 w-4 shrink-0 text-[var(--color-muted-foreground)]" aria-hidden />
+                        <span className="min-w-0 flex-1 truncate font-medium">
+                          Amex ({catCard.length} {catCard.length === 1 ? "charge" : "charges"})
+                        </span>
+                        <span className="font-medium tabular-nums">{formatMoney(sumMoney(catCard.map((t) => t.amount)), true)}</span>
+                      </button>
+                    )}
                   </div>
                 )}
                 {!onlyMissing && (
-                  <div className={cn("px-2 py-1.5", visible.length + catOneOffs.length > 0 && "border-t border-[var(--color-border)]")}>
+                  <div className={cn("px-2 py-1.5", visible.length + catOneOffs.length + catCard.length > 0 && "border-t border-[var(--color-border)]")}>
                     <Button
                       variant="ghost"
                       size="sm"

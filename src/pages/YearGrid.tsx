@@ -17,6 +17,9 @@ import { useBudget } from "@/hooks/useBudget";
 import { useChartColors } from "@/lib/chartColors";
 import {
   categoryHasData,
+  categoryCard,
+  categoryEntriesTotal,
+  categoryHasEntries,
   categoryOneOffs,
   currentMonthKey,
   formatMoney,
@@ -206,8 +209,9 @@ export function YearGrid() {
                 const catItems = items.filter((i) => i.category_id === cat.id);
                 const totals = months.map((m) => totalForCategoryMonth(ledger, cat.id, m));
                 const has = months.map((m) => categoryHasData(ledger, cat.id, m));
-                const oneOffTotals = months.map((m) => sumMoney(categoryOneOffs(ledger, cat.id, m).map((o) => o.amount)));
-                const hasCatOneOffs = months.some((m) => categoryOneOffs(ledger, cat.id, m).length > 0);
+                // The category's own "Entries" row: category-only entries plus card charges filed to it
+                const entryTotals = months.map((m) => categoryEntriesTotal(ledger, cat.id, m));
+                const hasEntries = months.map((m) => categoryHasEntries(ledger, cat.id, m));
                 return (
                   <Fragment key={cat.id}>
                     <SummaryRow
@@ -244,11 +248,11 @@ export function YearGrid() {
                           onOpenCell={(month) => setCell({ kind: "item", item, month })}
                         />
                       ))}
-                    {isOpen && hasCatOneOffs && (
+                    {isOpen && hasEntries.some(Boolean) && (
                       <SummaryRow
                         label={<span className="pl-5 italic">Entries</span>}
-                        values={oneOffTotals}
-                        has={months.map((m) => categoryOneOffs(ledger, cat.id, m).length > 0)}
+                        values={entryTotals}
+                        has={hasEntries}
                         color={colors.categorical[0]}
                         rowClass="border-b border-[var(--color-border)]"
                         nameBg="bg-[var(--color-card)]"
@@ -621,7 +625,7 @@ function CellDialog({
           ? itemCard(ledger, target.item.id, month)
           : target.kind === "uncategorized"
             ? uncategorizedCard(ledger, month)
-            : []
+            : categoryCard(ledger, target.category.id, month)
         ).map((t) => t.id)
       )
   );
