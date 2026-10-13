@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, ChevronDown, ChevronsDownUp, ChevronsUpDown, CreditCard, Plus, Settings2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, FolderPlus, ListPlus, ChevronsDownUp, ChevronsUpDown, CreditCard, Plus, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
@@ -11,6 +11,7 @@ import { EmptyBudget } from "@/components/EmptyBudget";
 import { OneOffDialog } from "@/components/OneOffDialog";
 import { CardChargesRow, OneOffList } from "@/components/OneOffList";
 import { RecurringPanel } from "@/components/RecurringPanel";
+import { CategoryDialog, ItemDialog } from "@/components/StructureDialogs";
 import { VaryingAmountsCard } from "@/components/VaryingAmountsCard";
 import { StepperNav } from "@/components/StepperNav";
 import { SummaryTiles } from "@/components/SummaryTiles";
@@ -40,6 +41,7 @@ import type { Transaction } from "@/lib/transactions";
 import { cn } from "@/lib/utils";
 
 type EditingOneOff = { oneOff: OneOff | null; category_id?: string | null; startRecurring?: boolean } | null;
+type Creating = { type: "category" } | { type: "item"; categoryId: string } | null;
 
 const COLLAPSED_KEY = "budgeto-month-collapsed";
 
@@ -74,6 +76,7 @@ export function MonthEntry() {
     applyCreated,
   } = useBudget(addMonths(month, -3), addMonths(month, 1));
   const [editingOneOff, setEditingOneOff] = useState<EditingOneOff>(null);
+  const [creating, setCreating] = useState<Creating>(null);
   // Which card charges the dialog shows (a snapshot, so a reassigned charge stays in view)
   const [cardDialog, setCardDialog] = useState<{ title: string; description: string; ids: Set<string> } | null>(null);
   // Categories folded down to their header; remembered across months and visits
@@ -197,8 +200,11 @@ export function MonthEntry() {
             </aside>
 
             <section className="space-y-4 xl:col-start-1 xl:row-start-1" aria-label="Categories">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold text-[var(--color-muted-foreground)]">Categories</h2>
+              <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
+                <h2 className="mr-auto text-sm font-semibold text-[var(--color-muted-foreground)]">Categories</h2>
+                <Button variant="ghost" size="sm" className="text-[var(--color-primary)]" onClick={() => setCreating({ type: "category" })}>
+                  <FolderPlus /> New category
+                </Button>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -219,6 +225,7 @@ export function MonthEntry() {
                   collapsed={collapsed.has(cat.id)}
                   onToggle={() => toggleCategory(cat.id)}
                   onAdd={() => setEditingOneOff({ oneOff: null, category_id: cat.id })}
+                  onAddItem={() => setCreating({ type: "item", categoryId: cat.id })}
                   onEdit={(o) => setEditingOneOff({ oneOff: o })}
                   onShowCard={showCard}
                 />
@@ -239,6 +246,31 @@ export function MonthEntry() {
           oneOffs={oneOffs}
           onSaved={applyTransactions}
           onCreated={applyCreated}
+        />
+      )}
+
+      {creating?.type === "category" && (
+        <CategoryDialog
+          category={null}
+          nextSortOrder={(categories.length + 1) * 10}
+          onClose={() => setCreating(null)}
+          onSaved={() => {
+            setCreating(null);
+            refresh();
+          }}
+        />
+      )}
+      {creating?.type === "item" && (
+        <ItemDialog
+          item={null}
+          categoryId={creating.categoryId}
+          categories={activeCategories}
+          nextSortOrder={(items.filter((i) => i.category_id === creating.categoryId).length + 1) * 10}
+          onClose={() => setCreating(null)}
+          onSaved={() => {
+            setCreating(null);
+            refresh();
+          }}
         />
       )}
 
@@ -274,6 +306,7 @@ function CategoryCard({
   collapsed,
   onToggle,
   onAdd,
+  onAddItem,
   onEdit,
   onShowCard,
 }: {
@@ -284,6 +317,7 @@ function CategoryCard({
   collapsed: boolean;
   onToggle: () => void;
   onAdd: () => void;
+  onAddItem: () => void;
   onEdit: (o: OneOff) => void;
   onShowCard: (title: string, description: string, card: Transaction[]) => void;
 }) {
@@ -355,9 +389,17 @@ function CategoryCard({
               />
             )}
           </ul>
-          <div className={cn("px-2 py-1.5", lineItems.length + (hasOther ? 1 : 0) > 0 && "border-t border-[var(--color-border)]")}>
+          <div
+            className={cn(
+              "flex flex-wrap gap-x-1 px-2 py-1.5",
+              lineItems.length + (hasOther ? 1 : 0) > 0 && "border-t border-[var(--color-border)]"
+            )}
+          >
             <Button variant="ghost" size="sm" className="text-[var(--color-primary)]" onClick={onAdd}>
               <Plus /> Add manual entry
+            </Button>
+            <Button variant="ghost" size="sm" className="text-[var(--color-muted-foreground)]" onClick={onAddItem}>
+              <ListPlus /> Add line item
             </Button>
           </div>
         </div>
