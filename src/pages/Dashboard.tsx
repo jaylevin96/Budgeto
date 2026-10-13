@@ -544,7 +544,7 @@ function SectionHeading({ eyebrow, title, subtitle }: { eyebrow: string; title: 
   return (
     <div className="space-y-1">
       <p className={eyebrowClass}>{eyebrow}</p>
-      <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h2>
+      <h2 className="text-2xl font-bold tracking-tight tabular-nums sm:text-3xl">{title}</h2>
       <p className="text-sm text-[var(--color-muted-foreground)]">{subtitle}</p>
     </div>
   );

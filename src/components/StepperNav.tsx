@@ -31,8 +31,8 @@ export function StepperNav({
   const Heading = size === "lg" ? "h1" : "h2";
   const heading =
     size === "lg"
-      ? "font-display text-3xl font-semibold tracking-tight sm:text-4xl"
-      : "font-display text-2xl font-semibold tracking-tight sm:text-3xl";
+      ? "text-3xl font-bold tracking-tight tabular-nums sm:text-4xl"
+      : "text-2xl font-bold tracking-tight tabular-nums sm:text-3xl";
   return (
     <div className="flex items-center gap-3">
       {picker ? (
