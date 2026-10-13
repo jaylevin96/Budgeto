@@ -231,7 +231,7 @@ export function MonthEntry() {
             const catItems = activeItems.filter((i) => i.category_id === cat.id);
             const visible = onlyMissing ? catItems.filter((i) => !itemEntered(ledger, i.id, month)) : catItems;
             const catOneOffs = categoryOneOffs(ledger, cat.id, month);
-            if (!visible.length && (onlyMissing || !catOneOffs.length)) return null;
+            if (onlyMissing && !visible.length) return null;
             const subtotal = totalForCategoryMonth(ledger, cat.id, month);
             return (
               <Card key={cat.id}>
@@ -249,7 +249,7 @@ export function MonthEntry() {
                     <BudgetBar spent={subtotal} budget={cat.monthly_budget} />
                   )}
                 </div>
-                <ul className="divide-y divide-[var(--color-border)]">
+                <ul className="divide-y divide-[var(--color-border)] empty:hidden">
                   {visible.map((item) => (
                     <AmountRow
                       key={`${item.id}|${month}`}
@@ -279,6 +279,18 @@ export function MonthEntry() {
                       showTarget={false}
                       onEdit={(o) => setEditingOneOff({ oneOff: o })}
                     />
+                  </div>
+                )}
+                {!onlyMissing && (
+                  <div className={cn("px-2 py-1.5", visible.length + catOneOffs.length > 0 && "border-t border-[var(--color-border)]")}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-[var(--color-primary)]"
+                      onClick={() => setEditingOneOff({ oneOff: null, category_id: cat.id })}
+                    >
+                      <Plus /> Add one-off to {cat.name}
+                    </Button>
                   </div>
                 )}
               </Card>
