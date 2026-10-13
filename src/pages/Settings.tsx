@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowDown, ArrowUp, CreditCard, FileSpreadsheet, Pencil, Plus } from "lucide-react";
+import { ArrowDown, ArrowDownAZ, ArrowUp, CreditCard, Layers, FileSpreadsheet, Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
 import { EmptyBudget } from "@/components/EmptyBudget";
 import { CategoryDialog, ItemDialog } from "@/components/StructureDialogs";
-import { supabase } from "@/lib/supabase";
 import {
   fetchStructure,
   formatMoney,
   KIND_LABEL,
+  saveOrder,
   type Category,
+  type CategoryKind,
   type LineItem,
 } from "@/lib/budget";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,8 @@ type Editing =
   | { type: "category"; category: Category | null }
   | { type: "item"; item: LineItem | null; categoryId: string }
   | null;
+
+const KIND_ORDER: CategoryKind[] = ["income", "expense", "savings"];
 
 export function Settings() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -58,15 +61,30 @@ export function Settings() {
     if (i < 0 || j < 0 || j >= list.length) return;
     const reordered = [...list];
     [reordered[i], reordered[j]] = [reordered[j], reordered[i]];
-    const updates = reordered
-      .map((r, k) => ({ id: r.id, sort_order: (k + 1) * 10, changed: r.sort_order !== (k + 1) * 10 }))
-      .filter((u) => u.changed);
-    const results = await Promise.all(
-      updates.map((u) => supabase.from(table).update({ sort_order: u.sort_order }).eq("id", u.id))
-    );
-    const failed = results.find((r) => r.error);
-    if (failed?.error) setError(failed.error.message);
+    await reorder(table, reordered);
+  }
+
+  async function reorder<T extends { id: string; sort_order: number }>(table: "categories" | "line_items", ordered: T[]) {
+    try {
+      await saveOrder(table, ordered);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save the new order");
+    }
     load();
+  }
+
+  const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+
+  function sortCategories(by: "name" | "type") {
+    if (by === "name" && !window.confirm("Sort all categories A–Z? This replaces their current order.")) return;
+    // Group by type keeps the current order within each type
+    const sorted = [...categories].sort(by === "name" ? byName : (a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
+    reorder("categories", sorted);
+  }
+
+  function sortItems(cat: Category) {
+    if (!window.confirm(`Sort the line items in ${cat.name} A–Z? This replaces their current order.`)) return;
+    reorder("line_items", items.filter((i) => i.category_id === cat.id).sort(byName));
   }
 
   if (!loading && !error && categories.length === 0) return <EmptyBudget onSeeded={load} />;
@@ -82,7 +100,7 @@ export function Settings() {
             The rows of your budget. Recurring items are pre-filled on the Month page.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline" size="sm">
             <Link to="/import/card">
               <CreditCard /> Import Amex
@@ -99,15 +117,26 @@ export function Settings() {
         </div>
       </div>
 
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          className="h-4 w-4"
-          checked={showArchived}
-          onChange={(e) => setShowArchived(e.target.checked)}
-        />
-        Show archived
-      </label>
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
+        <label className="mr-auto flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={showArchived}
+            onChange={(e) => setShowArchived(e.target.checked)}
+          />
+          Show archived
+        </label>
+        <div className="flex items-center gap-1">
+          <span className="text-sm whitespace-nowrap text-[var(--color-muted-foreground)]">Sort categories:</span>
+          <Button variant="ghost" size="sm" onClick={() => sortCategories("name")} disabled={categories.length < 2}>
+            <ArrowDownAZ /> A–Z
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => sortCategories("type")} disabled={categories.length < 2}>
+            <Layers /> By type
+          </Button>
+        </div>
+      </div>
 
       {error && <FormError>{error}</FormError>}
       {loading && <p className="text-[var(--color-muted-foreground)]">Loading…</p>}
@@ -197,7 +226,7 @@ export function Settings() {
                   </Button>
                 </li>
               ))}
-              <li className="px-2 py-1">
+              <li className="flex flex-wrap gap-x-1 px-2 py-1">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -205,6 +234,11 @@ export function Settings() {
                 >
                   <Plus /> Add line item
                 </Button>
+                {catItems.length > 1 && (
+                  <Button variant="ghost" size="sm" className="text-[var(--color-muted-foreground)]" onClick={() => sortItems(cat)}>
+                    <ArrowDownAZ /> Sort A–Z
+                  </Button>
+                )}
               </li>
             </ul>
           </Card>

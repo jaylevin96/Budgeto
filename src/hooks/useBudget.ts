@@ -85,6 +85,17 @@ export function useBudget(fromKey: string, toKeyExclusive: string) {
     }));
   }, []);
 
+  /** Apply categories whose sort_order changed (after reordering) */
+  const applyCategories = useCallback((updated: Category[]) => {
+    setState((s) => {
+      const byId = new Map(updated.map((c) => [c.id, c]));
+      const categories = s.categories
+        .map((c) => byId.get(c.id) ?? c)
+        .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+      return { ...s, categories };
+    });
+  }, []);
+
   const applyTransactions = useCallback((saved: Transaction[]) => {
     setState((s) => {
       const byId = new Map(saved.map((t) => [t.id, t]));
@@ -97,5 +108,5 @@ export function useBudget(fromKey: string, toKeyExclusive: string) {
     [state.categories, state.items, state.oneOffs, state.transactions]
   );
 
-  return { ...state, ledger, reload: load, refresh, applyOneOff, applyOneOffs, applyTransactions, applyCreated };
+  return { ...state, ledger, reload: load, refresh, applyOneOff, applyOneOffs, applyTransactions, applyCreated, applyCategories };
 }

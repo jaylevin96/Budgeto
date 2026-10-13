@@ -149,6 +149,22 @@ export async function fetchStructure(): Promise<{ categories: Category[]; items:
   };
 }
 
+/**
+ * Save a new order for categories or line items: numbers `ordered` 10, 20, … and writes the rows
+ * whose number changed. Returns the rows with their new sort_order.
+ */
+export async function saveOrder<T extends { id: string; sort_order: number }>(
+  table: "categories" | "line_items",
+  ordered: T[]
+): Promise<T[]> {
+  const renumbered = ordered.map((r, k) => ({ ...r, sort_order: (k + 1) * 10 }));
+  const changed = renumbered.filter((r, k) => r.sort_order !== ordered[k].sort_order);
+  const results = await Promise.all(changed.map((r) => supabase.from(table).update({ sort_order: r.sort_order }).eq("id", r.id)));
+  const failed = results.find((r) => r.error);
+  if (failed?.error) throw failed.error;
+  return renumbered;
+}
+
 export type CreatedStructure = { category: Category | null; item: LineItem };
 
 /**

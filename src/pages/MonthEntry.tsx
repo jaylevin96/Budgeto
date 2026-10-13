@@ -1,6 +1,20 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, ChevronDown, FolderPlus, ListPlus, ChevronsDownUp, ChevronsUpDown, CreditCard, Plus, Settings2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Check,
+  ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  CreditCard,
+  FolderPlus,
+  ListPlus,
+  Plus,
+  Settings2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
@@ -28,6 +42,7 @@ import {
   KIND_LABEL,
   monthKeyFromSlug,
   monthSlug,
+  saveOrder,
   summarizeMonth,
   sumMoney,
   totalForCategoryMonth,
@@ -74,9 +89,12 @@ export function MonthEntry() {
     refresh,
     applyTransactions,
     applyCreated,
+    applyCategories,
   } = useBudget(addMonths(month, -3), addMonths(month, 1));
   const [editingOneOff, setEditingOneOff] = useState<EditingOneOff>(null);
   const [creating, setCreating] = useState<Creating>(null);
+  const [reordering, setReordering] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
   // A recurring entry whose amount changes each month opens in its own modal (this month's amount)
   const [managing, setManaging] = useState<RecurringEntry | null>(null);
   // Which card charges the dialog shows (a snapshot, so a reassigned charge stays in view)
@@ -117,6 +135,24 @@ export function MonthEntry() {
 
   const go = (delta: number) => navigate(`/month/${monthSlug(addMonths(month, delta))}`);
   const allCollapsed = activeCategories.length > 0 && activeCategories.every((c) => collapsed.has(c.id));
+
+  /** Swap a category with its neighbour; shows the new order right away, then saves it. */
+  async function moveCategory(index: number, dir: -1 | 1) {
+    const j = index + dir;
+    if (j < 0 || j >= activeCategories.length) return;
+    const reordered = [...activeCategories];
+    [reordered[index], reordered[j]] = [reordered[j], reordered[index]];
+    // Archived categories keep their place after the active ones
+    const ordered = [...reordered, ...categories.filter((c) => c.archived)];
+    applyCategories(ordered.map((c, k) => ({ ...c, sort_order: (k + 1) * 10 })));
+    setOrderError(null);
+    try {
+      await saveOrder("categories", ordered);
+    } catch (err) {
+      setOrderError(err instanceof Error ? err.message : "Couldn't save the new order");
+      refresh();
+    }
+  }
 
   if (!loading && !error && categories.length === 0) return <EmptyBudget onSeeded={reload} />;
 
@@ -202,34 +238,85 @@ export function MonthEntry() {
             <section className="space-y-4 xl:col-start-1 xl:row-start-1" aria-label="Categories">
               <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
                 <h2 className="mr-auto text-sm font-semibold text-[var(--color-muted-foreground)]">Categories</h2>
-                <Button variant="ghost" size="sm" className="text-[var(--color-primary)]" onClick={() => setCreating({ type: "category" })}>
-                  <FolderPlus /> New category
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(activeCategories.map((c) => c.id)))}
-                >
-                  {allCollapsed ? <ChevronsUpDown /> : <ChevronsDownUp />}
-                  {allCollapsed ? "Expand all" : "Collapse all"}
-                </Button>
+                {reordering ? (
+                  <Button size="sm" onClick={() => setReordering(false)}>
+                    <Check /> Done
+                  </Button>
+                ) : (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-[var(--color-primary)]"
+                      onClick={() => setCreating({ type: "category" })}
+                    >
+                      <FolderPlus /> New category
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setReordering(true)}>
+                      <ArrowUpDown /> Reorder
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(activeCategories.map((c) => c.id)))}
+                    >
+                      {allCollapsed ? <ChevronsUpDown /> : <ChevronsDownUp />}
+                      {allCollapsed ? "Expand all" : "Collapse all"}
+                    </Button>
+                  </>
+                )}
               </div>
 
-              {activeCategories.map((cat) => (
-                <CategoryCard
-                  key={cat.id}
-                  category={cat}
-                  lineItems={activeItems.filter((i) => i.category_id === cat.id)}
-                  month={month}
-                  ledger={ledger}
-                  collapsed={collapsed.has(cat.id)}
-                  onToggle={() => toggleCategory(cat.id)}
-                  onAdd={() => setEditingOneOff({ oneOff: null, category_id: cat.id })}
-                  onAddItem={() => setCreating({ type: "item", categoryId: cat.id })}
-                  onEdit={editEntry}
-                  onShowCard={showCard}
-                />
-              ))}
+              {orderError && <FormError>{orderError}</FormError>}
+
+              {reordering ? (
+                <Card>
+                  <ol className="divide-y divide-[var(--color-border)]">
+                    {activeCategories.map((cat, ci) => (
+                      <li key={cat.id} className="flex items-center gap-2 py-1.5 pr-2 pl-4">
+                        <span className="min-w-0 flex-1 truncate font-medium">
+                          {cat.name}
+                          <span className="ml-2 text-xs font-normal text-[var(--color-muted-foreground)]">{KIND_LABEL[cat.kind]}</span>
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Move ${cat.name} up`}
+                          disabled={ci === 0}
+                          onClick={() => moveCategory(ci, -1)}
+                        >
+                          <ArrowUp />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Move ${cat.name} down`}
+                          disabled={ci === activeCategories.length - 1}
+                          onClick={() => moveCategory(ci, 1)}
+                        >
+                          <ArrowDown />
+                        </Button>
+                      </li>
+                    ))}
+                  </ol>
+                </Card>
+              ) : (
+                activeCategories.map((cat) => (
+                  <CategoryCard
+                    key={cat.id}
+                    category={cat}
+                    lineItems={activeItems.filter((i) => i.category_id === cat.id)}
+                    month={month}
+                    ledger={ledger}
+                    collapsed={collapsed.has(cat.id)}
+                    onToggle={() => toggleCategory(cat.id)}
+                    onAdd={() => setEditingOneOff({ oneOff: null, category_id: cat.id })}
+                    onAddItem={() => setCreating({ type: "item", categoryId: cat.id })}
+                    onEdit={editEntry}
+                    onShowCard={showCard}
+                  />
+                ))
+              )}
             </section>
           </div>
         </>
