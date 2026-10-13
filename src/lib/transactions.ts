@@ -1,6 +1,5 @@
 import { supabase } from "@/lib/supabase";
 import type { ParsedStatement, Rule, StatementRow } from "@/lib/amex";
-import type { LineItem, OneOff } from "@/lib/budget";
 
 export type Transaction = {
   id: string;
@@ -134,26 +133,17 @@ export async function fetchExistingRefs(refs: string[]): Promise<Set<string>> {
   return found;
 }
 
-export type ReviewedRow = {
-  row: StatementRow;
-  destination: Destination;
-  /** Turn this charge into a new one-off (grouped with same-merchant charges that month) */
-  makeOneOff: boolean;
-};
-
-const titleCase = (s: string) => s.toLowerCase().replace(/(^|[\s&/-])(\w)/g, (_, p, c) => p + c.toUpperCase());
+export type ReviewedRow = { row: StatementRow; destination: Destination };
 
 /**
- * Save one statement's new rows: the import record, any new one-offs made from charges
- * (one per merchant per month, filed where the charges were), then the transactions.
- * If anything fails, the import record is deleted, which removes the rest with it.
+ * Save one statement's new rows: the import record, then its transactions.
+ * If the transactions fail to insert, the import record is deleted again.
  */
 export async function saveStatement(
   statement: ParsedStatement,
   fileName: string,
-  rows: ReviewedRow[],
-  items: LineItem[]
-): Promise<{ record: ImportRecord; oneOffs: OneOff[] }> {
+  rows: ReviewedRow[]
+): Promise<ImportRecord> {
   const counted = rows.filter((r) => !r.destination.excluded);
   const total = Math.round(counted.reduce((s, r) => s + Math.round(r.row.amount * 100), 0)) / 100;
   const { data: imp, error } = await supabase
@@ -172,60 +162,26 @@ export async function saveStatement(
   if (error) throw error;
 
   try {
-    // New one-offs: group by month + merchant + where they're filed
-    const groups = new Map<string, ReviewedRow[]>();
-    for (const r of rows) {
-      if (!r.makeOneOff || r.destination.excluded || r.destination.one_off_id) continue;
-      const key = `${r.row.month}|${r.row.merchant}|${r.destination.line_item_id ?? ""}`;
-      groups.set(key, [...(groups.get(key) ?? []), r]);
-    }
-    const created: OneOff[] = [];
-    const oneOffFor = new Map<ReviewedRow, string>();
-    for (const list of groups.values()) {
-      const amount = Math.round(list.reduce((s, r) => s + Math.round(r.row.amount * 100), 0)) / 100;
-      if (amount <= 0) continue;
-      const itemId = list[0].destination.line_item_id;
-      const { data, error: ooError } = await supabase
-        .from("one_offs")
-        .insert({
-          name: titleCase(list[0].row.merchant),
-          amount,
-          month: list[0].row.month,
-          line_item_id: itemId,
-          category_id: itemId ? items.find((i) => i.id === itemId)?.category_id ?? null : null,
-          note: list.length > 1 ? `Amex, ${list.length} charges` : "Amex",
-          import_id: imp.id,
-        })
-        .select("id, name, amount, month, category_id, line_item_id, note")
-        .single();
-      if (ooError) throw ooError;
-      created.push({ ...(data as OneOff), amount: Number(data.amount) });
-      for (const r of list) oneOffFor.set(r, data.id as string);
-    }
-
-    const payload = rows.map((r) => {
-      const oneOffId = oneOffFor.get(r) ?? r.destination.one_off_id;
-      return {
-        import_id: imp.id,
-        source: "amex",
-        external_id: r.row.externalId,
-        posted_on: r.row.postedOn,
-        month: r.row.month,
-        description: r.row.description,
-        merchant: r.row.merchant,
-        card_member: r.row.cardMember,
-        source_category: r.row.sourceCategory,
-        amount: r.row.amount,
-        line_item_id: oneOffId || r.destination.excluded ? null : r.destination.line_item_id,
-        one_off_id: oneOffId,
-        excluded: r.destination.excluded,
-      };
-    });
+    const payload = rows.map(({ row, destination: d }) => ({
+      import_id: imp.id,
+      source: "amex",
+      external_id: row.externalId,
+      posted_on: row.postedOn,
+      month: row.month,
+      description: row.description,
+      merchant: row.merchant,
+      card_member: row.cardMember,
+      source_category: row.sourceCategory,
+      amount: row.amount,
+      line_item_id: d.one_off_id || d.excluded ? null : d.line_item_id,
+      one_off_id: d.one_off_id,
+      excluded: d.excluded,
+    }));
     for (let i = 0; i < payload.length; i += 500) {
       const { error: txError } = await supabase.from("transactions").insert(payload.slice(i, i + 500));
       if (txError) throw txError;
     }
-    return { record: { ...(imp as ImportRecord), total: Number(imp.total) }, oneOffs: created };
+    return { ...(imp as ImportRecord), total: Number(imp.total) };
   } catch (err) {
     await supabase.from("imports").delete().eq("id", imp.id);
     throw err;
@@ -242,7 +198,7 @@ export async function fetchImports(): Promise<ImportRecord[]> {
   return (data as ImportRecord[]).map((r) => ({ ...r, total: Number(r.total) }));
 }
 
-/** Undo an import: its transactions and the one-offs made from them are deleted with it. */
+/** Undo an import: its transactions are deleted with it. */
 export async function deleteImport(id: string) {
   const { error } = await supabase.from("imports").delete().eq("id", id);
   if (error) throw error;

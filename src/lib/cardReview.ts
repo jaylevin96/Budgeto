@@ -6,14 +6,10 @@ type Named = { id: string; name: string };
 type Item = Named & { category_id: string; archived?: boolean };
 type OneOffLike = { id: string; name: string; amount: number; month: string };
 
-/** Charges at or above this are pre-marked "one-off" so they show with big purchases */
-export const ONE_OFF_THRESHOLD = 500;
-
 export type ReviewRow = {
   row: StatementRow;
   /** Select value: "", "exclude", "oneoff:<id>" or a line item id */
   value: string;
-  makeOneOff: boolean;
   reason: Assignment["reason"] | "matches one-off";
   /** Changed by hand on the review screen (those choices get remembered as rules) */
   touched: boolean;
@@ -44,7 +40,6 @@ export function buildReview(
     return {
       row,
       value: a.excluded ? EXCLUDE : a.lineItemId ?? "",
-      makeOneOff: !a.excluded && row.amount >= ONE_OFF_THRESHOLD,
       reason: a.reason,
       touched: false,
     };
@@ -54,7 +49,6 @@ export function buildReview(
   const link = (list: ReviewRow[], oneOffId: string) => {
     for (const r of list) {
       r.value = ONE_OFF + oneOffId;
-      r.makeOneOff = false;
       r.reason = "matches one-off";
     }
   };

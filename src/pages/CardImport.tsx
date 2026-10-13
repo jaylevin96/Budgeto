@@ -22,7 +22,7 @@ import {
   type LineItem,
   type OneOff,
 } from "@/lib/budget";
-import { buildReview, ONE_OFF_THRESHOLD, type ReviewRow } from "@/lib/cardReview";
+import { buildReview, type ReviewRow } from "@/lib/cardReview";
 import {
   deleteImport,
   EXCLUDE,
@@ -74,7 +74,7 @@ export function CardImport() {
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<{ months: string[]; count: number; oneOffs: number } | null>(null);
+  const [done, setDone] = useState<{ months: string[]; count: number } | null>(null);
   const [remember, setRemember] = useState(true);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [member, setMember] = useState("");
@@ -137,7 +137,7 @@ export function CardImport() {
   function setValue(target: ReviewRow, value: string) {
     setRows((prev) =>
       prev.map((r) => {
-        if (r === target) return { ...r, value, touched: true, makeOneOff: value === EXCLUDE || value.startsWith("oneoff:") ? false : r.makeOneOff };
+        if (r === target) return { ...r, value, touched: true };
         if (!value.startsWith("oneoff:") && !r.touched && r.row.merchant === target.row.merchant && r.reason !== "payment" && !r.value.startsWith("oneoff:")) {
           return { ...r, value };
         }
@@ -146,20 +146,18 @@ export function CardImport() {
     );
   }
 
-  const setOneOff = (target: ReviewRow, makeOneOff: boolean) =>
-    setRows((prev) => prev.map((r) => (r === target ? { ...r, makeOneOff } : r)));
 
   async function handleImport() {
     if (!loaded || !rows.length) return;
     setBusy(true);
     setError(null);
     try {
-      const reviewed = rows.map((r) => ({ row: r.row, destination: parseDestination(r.value), makeOneOff: r.makeOneOff }));
-      const { oneOffs } = await saveStatement(loaded.statement, loaded.fileName, reviewed, loaded.items);
+      const reviewed = rows.map((r) => ({ row: r.row, destination: parseDestination(r.value) }));
+      await saveStatement(loaded.statement, loaded.fileName, reviewed);
       if (remember) {
         await saveMerchantRules(rows.filter((r) => r.touched).map((r) => ({ merchant: r.row.merchant, destination: parseDestination(r.value) })));
       }
-      setDone({ months: [...new Set(rows.map((r) => r.row.month))].sort(), count: rows.length, oneOffs: oneOffs.length });
+      setDone({ months: [...new Set(rows.map((r) => r.row.month))].sort(), count: rows.length });
       setLoaded(null);
       setRows([]);
       loadHistory();
@@ -172,7 +170,7 @@ export function CardImport() {
 
   async function handleUndo(imp: ImportRecord) {
     const label = imp.period_start && imp.period_end ? `${formatDay(imp.period_start)}–${formatDay(imp.period_end)}` : imp.file_name;
-    if (!window.confirm(`Undo the ${label} import? Its ${imp.row_count} card charges, and any one-offs made from them, will be deleted.`)) return;
+    if (!window.confirm(`Undo the ${label} import? Its ${imp.row_count} card charges will be deleted.`)) return;
     try {
       await deleteImport(imp.id);
       setDone(null);
@@ -189,7 +187,7 @@ export function CardImport() {
 
   /** Typed amount already in the cell this charge would add to */
   const typedClash = (r: ReviewRow) => {
-    if (!r.value || r.value === EXCLUDE || r.value.startsWith("oneoff:") || r.makeOneOff) return null;
+    if (!r.value || r.value === EXCLUDE || r.value.startsWith("oneoff:")) return null;
     return loaded?.typed.get(r.value)?.get(r.row.month) ?? null;
   };
   const needsAttention = (r: ReviewRow) => r.value === "" || typedClash(r) !== null;
@@ -211,7 +209,6 @@ export function CardImport() {
       lines: new Set(filed.map((r) => r.value)).size,
       unfiled: counted.filter((r) => r.value === "").length,
       unfiledTotal: sumMoney(counted.filter((r) => r.value === "").map((r) => r.row.amount)),
-      oneOffs: new Set(list.filter((r) => r.makeOneOff && r.value !== EXCLUDE).map((r) => `${r.row.merchant}|${r.value}`)).size,
       covered: sumMoney(list.filter((r) => r.value.startsWith("oneoff:")).map((r) => r.row.amount)),
     };
   });
@@ -262,7 +259,7 @@ export function CardImport() {
           {done && (
             <FormSuccess>
               Imported {done.count} card {done.count === 1 ? "charge" : "charges"}
-              {done.oneOffs > 0 && ` and created ${done.oneOffs} one-off${done.oneOffs === 1 ? "" : "s"}`}. Open{" "}
+. Open{" "}
               {done.months.map((m, i) => (
                 <span key={m}>
                   {i > 0 && (i === done.months.length - 1 ? " and " : ", ")}
@@ -339,8 +336,7 @@ export function CardImport() {
                           + {formatMoney(m.unfiledTotal, true)} uncategorized ({m.unfiled})
                         </span>
                       )}
-                      {m.oneOffs > 0 && ` · ${m.oneOffs} new one-off${m.oneOffs === 1 ? "" : "s"}`}
-                      {m.covered > 0 && ` · ${formatMoney(m.covered, true)} already entered as one-offs`}
+                                            {m.covered > 0 && ` · ${formatMoney(m.covered, true)} already entered as one-offs`}
                     </p>
                   ))}
                   {clashes > 0 && (
@@ -378,7 +374,6 @@ export function CardImport() {
                   {visible.map((r) => {
                     const clash = typedClash(r);
                     const linkedOneOff = r.value.startsWith("oneoff:") ? oneOffById.get(r.value.slice(7)) : undefined;
-                    const canBeOneOff = r.row.amount > 0 && r.value !== EXCLUDE && !linkedOneOff;
                     return (
                       <li key={r.row.externalId} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
                         <div className="min-w-0 flex-1 basis-56">
@@ -417,19 +412,6 @@ export function CardImport() {
                           className="w-full sm:w-56"
                           aria-label={`Where ${r.row.merchant} on ${formatDay(r.row.postedOn)} goes`}
                         />
-                        <label
-                          className={cn("flex w-24 items-center gap-1.5 text-xs", !canBeOneOff && "invisible")}
-                          title={`Show it with big purchases. One-off per merchant per month, filed under the line item you picked${r.value ? "" : " (or uncategorized)"}.`}
-                        >
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4"
-                            checked={canBeOneOff && r.makeOneOff}
-                            disabled={!canBeOneOff}
-                            onChange={(e) => setOneOff(r, e.target.checked)}
-                          />
-                          One-off
-                        </label>
                         {clash !== null && (
                           <p className="flex w-full items-center justify-end gap-1 text-xs text-[var(--color-warning)]">
                             <AlertTriangle className="h-3 w-3" aria-hidden />
@@ -461,8 +443,7 @@ export function CardImport() {
                 </div>
               </Card>
               <p className="text-xs text-[var(--color-muted-foreground)]">
-                Charges of {formatMoney(ONE_OFF_THRESHOLD)} or more start out marked as one-offs. Uncategorized
-                charges still count as spending. You can file them later from the Month page.
+                Uncategorized charges still count as spending. You can file them later from the Month page.
               </p>
             </>
           )}
@@ -472,7 +453,7 @@ export function CardImport() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-lg">Past imports</CardTitle>
-          <CardDescription>Undo removes that statement's charges and any one-offs made from them.</CardDescription>
+          <CardDescription>Undo removes that statement's charges.</CardDescription>
         </CardHeader>
         <CardContent>
           <FormError>{historyError}</FormError>
