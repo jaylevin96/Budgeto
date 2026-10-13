@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { countsOnItsOwn, type Transaction } from "@/lib/transactions";
 
 export type CategoryKind = "income" | "expense" | "savings";
 export type Recurrence = "fixed" | "variable" | "none";
@@ -281,9 +282,11 @@ function bucket<T>(map: MonthBuckets<T>, key: string, month: string, value: T) {
 }
 
 /**
- * Everything needed to total a month: typed cells plus one-offs.
+ * Everything needed to total a month: typed cells, one-offs and card charges.
  * One-offs tied to a line item add to that item; tied only to a category they form
  * that category's "One-offs" row; untied ones are "Uncategorized" spending.
+ * Card charges filed under a line item add to that item; unfiled ones are "Uncategorized"
+ * spending; excluded ones and ones covered by a one-off don't count on their own.
  */
 export type Ledger = {
   categories: Category[];
@@ -298,6 +301,12 @@ export type Ledger = {
   oneOffsByCategory: MonthBuckets<OneOff>;
   /** month → untied one-offs */
   uncategorized: Map<string, OneOff[]>;
+  /** All card transactions loaded (including excluded and covered ones) */
+  transactions: Transaction[];
+  /** Counted card charges filed under a line item */
+  cardByItem: MonthBuckets<Transaction>;
+  /** month → counted card charges not filed anywhere yet */
+  cardUncategorized: Map<string, Transaction[]>;
   kindByCategory: Map<string, CategoryKind>;
 };
 
@@ -305,7 +314,8 @@ export function buildLedger(
   categories: Category[],
   items: LineItem[],
   amounts: MonthlyAmount[],
-  oneOffs: OneOff[]
+  oneOffs: OneOff[],
+  transactions: Transaction[] = []
 ): Ledger {
   const itemIds = new Set(items.map((i) => i.id));
   const catIds = new Set(categories.map((c) => c.id));
@@ -324,6 +334,13 @@ export function buildLedger(
     else if (o.category_id && catIds.has(o.category_id)) bucket(oneOffsByCategory, o.category_id, o.month, o);
     else uncategorized.set(o.month, [...(uncategorized.get(o.month) ?? []), o]);
   }
+  const cardByItem: MonthBuckets<Transaction> = new Map();
+  const cardUncategorized = new Map<string, Transaction[]>();
+  for (const t of transactions) {
+    if (!countsOnItsOwn(t)) continue;
+    if (t.line_item_id && itemIds.has(t.line_item_id)) bucket(cardByItem, t.line_item_id, t.month, t);
+    else cardUncategorized.set(t.month, [...(cardUncategorized.get(t.month) ?? []), t]);
+  }
   return {
     categories,
     items,
@@ -333,6 +350,9 @@ export function buildLedger(
     oneOffsByItem,
     oneOffsByCategory,
     uncategorized,
+    transactions,
+    cardByItem,
+    cardUncategorized,
     kindByCategory: new Map(categories.map((c) => [c.id, c.kind])),
   };
 }
@@ -347,12 +367,28 @@ export function categoryOneOffs(L: Ledger, categoryId: string, month: string): O
   return L.oneOffsByCategory.get(categoryId)?.get(month) ?? [];
 }
 
-/** Typed amount + linked one-offs; undefined when neither exists. */
+export function itemCard(L: Ledger, itemId: string, month: string): Transaction[] {
+  return L.cardByItem.get(itemId)?.get(month) ?? [];
+}
+
+export function uncategorizedCard(L: Ledger, month: string): Transaction[] {
+  return L.cardUncategorized.get(month) ?? [];
+}
+
+const sumCard = (list: Transaction[] | undefined) => sumMoney((list ?? []).map((t) => t.amount));
+
+/** Typed amount + linked one-offs + card charges; undefined when none exist. */
 export function itemMonthTotal(L: Ledger, itemId: string, month: string): number | undefined {
   const base = L.idx.get(itemId)?.get(month);
   const linked = L.oneOffsByItem.get(itemId)?.get(month);
-  if (base === undefined && !linked?.length) return undefined;
-  return sumMoney([base ?? 0, sumOneOffs(linked)]);
+  const card = L.cardByItem.get(itemId)?.get(month);
+  if (base === undefined && !linked?.length && !card?.length) return undefined;
+  return sumMoney([base ?? 0, sumOneOffs(linked), sumCard(card)]);
+}
+
+/** Whether an item has anything this month: typed, or card charges (which count as entered) */
+export function itemEntered(L: Ledger, itemId: string, month: string): boolean {
+  return L.idx.get(itemId)?.has(month) === true || itemCard(L, itemId, month).length > 0;
 }
 
 export function totalForCategoryMonth(L: Ledger, categoryId: string, month: string): number {
@@ -370,8 +406,13 @@ export function categoryHasData(L: Ledger, categoryId: string, month: string): b
   );
 }
 
+/** Untied one-offs plus unfiled card charges */
 export function uncategorizedTotal(L: Ledger, month: string): number {
-  return sumOneOffs(L.uncategorized.get(month));
+  return sumMoney([sumOneOffs(L.uncategorized.get(month)), sumCard(L.cardUncategorized.get(month))]);
+}
+
+export function hasUncategorized(L: Ledger, month: string): boolean {
+  return (L.uncategorized.get(month) ?? []).length > 0 || uncategorizedCard(L, month).length > 0;
 }
 
 export type MonthSummary = {
@@ -381,7 +422,7 @@ export type MonthSummary = {
   savings: number;
   /** income − spending − savings: what's left over */
   net: number;
-  /** Count of typed cells this month (for "x of y entered") */
+  /** Count of entered cells this month: typed, or with card charges (for "x of y entered") */
   entered: number;
   /** Total of all one-offs this month */
   oneOffs: number;
@@ -393,7 +434,7 @@ export function summarizeMonth(L: Ledger, month: string): MonthSummary {
   const totals: Record<CategoryKind, number[]> = { income: [], expense: [], savings: [] };
   let entered = 0;
   for (const item of L.items) {
-    if (L.idx.get(item.id)?.has(month)) entered++;
+    if (itemEntered(L, item.id, month)) entered++;
     const v = itemMonthTotal(L, item.id, month);
     const kind = L.kindByCategory.get(item.category_id);
     if (v !== undefined && kind) totals[kind].push(v);
@@ -415,7 +456,7 @@ export function summarizeMonth(L: Ledger, month: string): MonthSummary {
     net: sumMoney([income, -spending, -savings]),
     entered,
     oneOffs: sumOneOffs(monthOneOffs),
-    hasData: entered > 0 || monthOneOffs.length > 0,
+    hasData: entered > 0 || monthOneOffs.length > 0 || uncategorizedCard(L, month).length > 0,
   };
 }
 

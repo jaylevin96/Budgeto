@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { AmountInput } from "@/components/AmountInput";
 import { useCellSaver } from "@/hooks/useCellSaver";
 import { EmptyBudget } from "@/components/EmptyBudget";
+import { CardTransactionList } from "@/components/CardTransactions";
 import { OneOffDialog } from "@/components/OneOffDialog";
 import { OneOffList } from "@/components/OneOffList";
 import { StepperNav } from "@/components/StepperNav";
@@ -20,6 +21,8 @@ import {
   currentMonthKey,
   formatMoney,
   formatMonth,
+  hasUncategorized as monthHasUncategorized,
+  itemCard,
   itemMonthTotal,
   itemOneOffs,
   KIND_LABEL,
@@ -31,6 +34,7 @@ import {
   summarizeMonth,
   sumMoney,
   totalForCategoryMonth,
+  uncategorizedCard,
   uncategorizedTotal,
   type Category,
   type Ledger,
@@ -38,6 +42,7 @@ import {
   type MonthlyAmount,
   type OneOff,
 } from "@/lib/budget";
+import type { Transaction } from "@/lib/transactions";
 import { cn } from "@/lib/utils";
 
 const cellClass = "px-1 py-1 text-right tabular-nums whitespace-nowrap";
@@ -69,7 +74,7 @@ export function YearGrid() {
   const year = /^\d{4}$/.test(params.year ?? "") ? Number(params.year) : parseMonthKey(currentMonthKey()).year;
   const months = Array.from({ length: 12 }, (_, m) => monthKey(year, m));
 
-  const { categories, items, oneOffs, ledger, loading, error, reload, applyAmount, applyOneOff } = useBudget(
+  const { categories, items, oneOffs, ledger, loading, error, reload, applyAmount, applyOneOff, applyTransactions } = useBudget(
     monthKey(year, 0),
     monthKey(year + 1, 0)
   );
@@ -127,7 +132,8 @@ export function YearGrid() {
   const summaries = months.map((m) => summarizeMonth(ledger, m));
   const visibleCats = categories.filter((c) => !c.archived || months.some((m) => categoryHasData(ledger, c.id, m)));
   const uncatTotals = months.map((m) => uncategorizedTotal(ledger, m));
-  const hasUncategorized = months.some((m) => (ledger.uncategorized.get(m) ?? []).length > 0);
+  const hasUncategorized = months.some((m) => monthHasUncategorized(ledger, m));
+  const hasUnfiledCard = months.some((m) => uncategorizedCard(ledger, m).length > 0);
   const allGroups = [...visibleCats.map((c) => c.id), ...(hasUncategorized ? [UNCATEGORIZED] : [])];
 
   const totalRows: { label: string; values: number[]; strong?: boolean }[] = [
@@ -261,16 +267,44 @@ export function YearGrid() {
                       className="flex w-full items-center gap-1 text-left"
                     >
                       {expanded.has(UNCATEGORIZED) ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      <span className="truncate font-semibold">Uncategorized one-offs</span>
+                      <span className="truncate font-semibold">Uncategorized</span>
                     </button>
                   }
                   values={uncatTotals}
-                  has={months.map((m) => (ledger.uncategorized.get(m) ?? []).length > 0)}
+                  has={months.map((m) => monthHasUncategorized(ledger, m))}
                   color={colors.categorical[0]}
                   rowClass="bg-[var(--color-muted)] font-medium"
                   nameBg="bg-[var(--color-muted)]"
                   onCellClick={(i) => setCell({ kind: "uncategorized", month: months[i] })}
                 />
+              )}
+              {hasUnfiledCard && expanded.has(UNCATEGORIZED) && (
+                <tr className="border-b border-[var(--color-border)] hover:bg-[var(--color-accent)]">
+                  <td className={cn(stickyName, "bg-[var(--color-card)] pl-8")}>Unfiled card charges</td>
+                  {months.map((m) => {
+                    const list = uncategorizedCard(ledger, m);
+                    return (
+                      <td key={m} className={cellClass}>
+                        {list.length ? (
+                          <button
+                            type="button"
+                            className="hover:underline"
+                            onClick={() => setCell({ kind: "uncategorized", month: m })}
+                            title={`${list.length} unfiled ${list.length === 1 ? "charge" : "charges"}`}
+                          >
+                            {formatMoney(sumMoney(list.map((t) => t.amount)))}
+                          </button>
+                        ) : (
+                          <span className="text-[var(--color-muted-foreground)]">·</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                  <td className={cn(cellClass, "font-medium")}>
+                    {formatMoney(sumMoney(months.flatMap((m) => uncategorizedCard(ledger, m)).map((t) => t.amount)))}
+                  </td>
+                  <td colSpan={3} />
+                </tr>
               )}
               {hasUncategorized &&
                 expanded.has(UNCATEGORIZED) &&
@@ -325,6 +359,7 @@ export function YearGrid() {
           onSaved={(itemId, month, saved) => applyAmount(itemId, month, saved)}
           onEditOneOff={(o) => setEditingOneOff({ oneOff: o, month: o.month })}
           onAddOneOff={(defaults) => setEditingOneOff({ oneOff: null, ...defaults })}
+          onTransactionsSaved={applyTransactions}
         />
       )}
       {editingOneOff && (
@@ -494,13 +529,15 @@ function ItemCell({
 }) {
   const value = ledger.idx.get(item.id)?.get(month);
   const linked = itemOneOffs(ledger, item.id, month);
+  const card = itemCard(ledger, item.id, month);
   const note = ledger.notes.get(item.id)?.get(month);
   const saver = useCellSaver(item.id, month, value, onSaved);
   const total = itemMonthTotal(ledger, item.id, month);
   const over = budget != null && total !== undefined && total > budget;
+  const extras = linked.length + card.length;
 
-  if (linked.length) {
-    // Combined value (typed + one-offs): edit through the dialog so the sum stays clear
+  if (extras) {
+    // Combined value (typed + one-offs + card): edit through the dialog so the sum stays clear
     return (
       <button
         type="button"
@@ -509,12 +546,20 @@ function ItemCell({
           "inline-flex h-8 items-center gap-1 rounded-md px-1.5 tabular-nums hover:bg-[var(--color-muted)]",
           over && "text-[var(--color-destructive)]"
         )}
-        aria-label={`${item.name} ${formatMonth(month, "short")}: ${formatMoney(total ?? 0)} including ${linked.length} one-off${linked.length > 1 ? "s" : ""}`}
-        title={linked.map((o) => `${o.name}: ${formatMoney(o.amount, true)}`).join("\n")}
+        aria-label={`${item.name} ${formatMonth(month, "short")}: ${formatMoney(total ?? 0)} including ${[
+          linked.length && `${linked.length} one-off${linked.length > 1 ? "s" : ""}`,
+          card.length && `${card.length} card charge${card.length > 1 ? "s" : ""}`,
+        ]
+          .filter(Boolean)
+          .join(" and ")}`}
+        title={[
+          ...linked.map((o) => `${o.name}: ${formatMoney(o.amount, true)}`),
+          ...card.map((t) => `${t.merchant}: ${formatMoney(t.amount, true)}`),
+        ].join("\n")}
       >
         {formatMoney(total ?? 0)}
         <span className="rounded bg-[var(--color-muted)] px-1 text-[10px] font-medium text-[var(--color-foreground)]">
-          +{linked.length}
+          +{extras}
         </span>
       </button>
     );
@@ -553,6 +598,7 @@ function CellDialog({
   onSaved,
   onEditOneOff,
   onAddOneOff,
+  onTransactionsSaved,
 }: {
   target: CellTarget;
   ledger: Ledger;
@@ -560,8 +606,22 @@ function CellDialog({
   onSaved: (itemId: string, month: string, saved: MonthlyAmount | null) => void;
   onEditOneOff: (o: OneOff) => void;
   onAddOneOff: (defaults: { month: string; category_id?: string | null; line_item_id?: string | null }) => void;
+  onTransactionsSaved: (saved: Transaction[]) => void;
 }) {
   const { month } = target;
+  // Snapshot of which card charges to show, so a reassigned charge stays in view
+  const [cardIds] = useState(
+    () =>
+      new Set(
+        (target.kind === "item"
+          ? itemCard(ledger, target.item.id, month)
+          : target.kind === "uncategorized"
+            ? uncategorizedCard(ledger, month)
+            : []
+        ).map((t) => t.id)
+      )
+  );
+  const cardList = ledger.transactions.filter((t) => cardIds.has(t.id));
   const list =
     target.kind === "item"
       ? itemOneOffs(ledger, target.item.id, month)
@@ -573,7 +633,7 @@ function CellDialog({
       ? `${target.item.name} · ${formatMonth(month)}`
       : target.kind === "category"
         ? `${target.category.name} one-offs · ${formatMonth(month)}`
-        : `Uncategorized one-offs · ${formatMonth(month)}`;
+        : `Uncategorized · ${formatMonth(month)}`;
   const addDefaults =
     target.kind === "item"
       ? { month, category_id: target.item.category_id, line_item_id: target.item.id }
@@ -583,17 +643,30 @@ function CellDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
+      <DialogContent className={cn(cardList.length > 0 && "max-w-2xl")}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {target.kind === "item" && (
             <DialogDescription>
               Total {formatMoney(itemMonthTotal(ledger, target.item.id, month) ?? 0, true)} = typed amount + one-offs
+              {cardList.length > 0 && " + card charges"}
             </DialogDescription>
           )}
         </DialogHeader>
         {target.kind === "item" && (
           <ItemCellEditor item={target.item} month={month} ledger={ledger} onSaved={(s) => onSaved(target.item.id, month, s)} />
+        )}
+        {cardList.length > 0 && (
+          <div className="-mx-4 rounded-md border border-[var(--color-border)] px-4 pt-2 sm:mx-0">
+            <p className="text-xs font-medium text-[var(--color-muted-foreground)]">Card charges</p>
+            <CardTransactionList
+              transactions={cardList}
+              categories={ledger.categories}
+              items={ledger.items}
+              oneOffs={ledger.oneOffs}
+              onSaved={onTransactionsSaved}
+            />
+          </div>
         )}
         <div className="-mx-4 rounded-md border border-[var(--color-border)] sm:mx-0">
           <p className="px-4 pt-2 text-xs font-medium text-[var(--color-muted-foreground)]">One-offs</p>

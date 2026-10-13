@@ -10,9 +10,10 @@ Same stack as Tracko: Vite + React 19 + TypeScript, Tailwind v4 + shadcn/ui, Sup
 - **Line items** (Rent, Comed, Jay Wage, …) are the rows. Each one is *fixed* (same amount monthly), *monthly, amount varies* (utilities) or *occasional*.
 - **Monthly amounts**: one total per line item per month, just like a spreadsheet cell. An empty cell means "not entered yet"; `0` means "nothing this month".
 - **One-off purchases** ("Miami flights $400", "New PlayStation $500") are named entries with a month and amount. Tie one to a line item and it adds to that item's month; tie it to just a category and it shows as that category's "One-offs" row; leave it untied and it counts as uncategorized spending.
+- **Amex charges**, imported monthly from the statement download, add on top of what's typed. Each charge counts once: filed under a line item (adds to that cell), unfiled (counts as uncategorized spending until filed), linked to a one-off you already entered (the one-off counts instead), or "don't count" (card payments). Big charges can become one-offs on import. Merchant choices are remembered, so later months mostly file themselves. See [`docs/AMEX_IMPORT.md`](docs/AMEX_IMPORT.md).
 - **Budgets** (optional): a monthly target on any category or line item, shown as budget vs actual.
 - **Notes**: any entered cell can carry a note (e.g. "AC ran all month").
-- **Left over** = income − spending − savings, calculated per month (one-offs included).
+- **Left over** = income − spending − savings, calculated per month (one-offs and card charges included).
 
 ### Pages
 
@@ -24,6 +25,7 @@ Same stack as Tracko: Vite + React 19 + TypeScript, Tailwind v4 + shadcn/ui, Sup
 | **One-offs** `/one-offs` | Every one-off purchase in a year, grouped by month |
 | **Settings** `/settings` | Add, rename, reorder or archive categories and line items; set recurring amounts |
 | **Import** `/settings/import` | One-time import of the `.xlsx` budget, with a preview of totals before saving |
+| **Import Amex** `/import/card` | Monthly: upload the Amex Excel/CSV download, review where each charge goes, import. Lists past imports with **Undo**. |
 
 ## Setup
 
@@ -34,6 +36,7 @@ The Supabase project is shared with Tracko and Resybot, so every Budgeto object 
 1. In the Supabase dashboard, open the **SQL Editor** and run each file in [`supabase/migrations/`](supabase/migrations/) in order, oldest first:
    - `20261013000000_budgeto_schema.sql` (categories, line items, monthly amounts)
    - `20261020000000_one_offs_budgets.sql` (one-off purchases and monthly budgets)
+   - `20261021000000_card_import.sql` (Amex import: imports, transactions, merchant rules)
 2. Go to **Project Settings → Data API → Exposed schemas** and add `budgeto`. Without this step, API calls fail with "schema must be one of the following".
 
 Run migrations from the SQL editor rather than `supabase db push`. The project's migration history also contains Tracko's migrations, which this repo doesn't have.
@@ -57,3 +60,13 @@ Import the repo in Vercel (framework preset: Vite) and set `VITE_SUPABASE_URL` a
 ### 5. Bring in the spreadsheet
 
 Sign in, go to **Settings → Import**, choose `2026_Budget.xlsx`, check the preview and click **Import**. Re-importing is safe: items are matched by name and amounts are overwritten.
+
+### 6. Each month: import the Amex statement
+
+On americanexpress.com open **Statements & Activity**, choose the statement and **Download → Excel**. In Budgeto, go to **Month → Import Amex** (or **Settings → Import Amex**) and choose the file.
+
+1. The statement's totals are checked against its summary sheet, and charges already imported are skipped. Uploading a statement twice is harmless.
+2. Each charge gets a destination: your remembered choice for that merchant, a suggestion from Amex's category (restaurants → Dining out, lodging → Accommodations, …), or **Uncategorized**. Card payments are left out automatically, and "Amex Split" credits from friends reduce the meal they paid back.
+3. If you already typed a purchase in as a one-off, the matching charge(s) are linked to it so it isn't counted twice. Charges of $500 or more start out marked **One-off** so they show with big purchases.
+4. A warning appears when a charge lands on a line that already has a typed amount that month (e.g. Netflix typed by hand *and* on the card). Choose **Don't count** or clear the typed amount.
+5. Click **Import**. Anything left uncategorized still counts as spending and shows as a "Review" banner on that Month page.

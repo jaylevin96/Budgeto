@@ -88,12 +88,12 @@ export function Dashboard() {
   );
   const lastYtd = lastYearSummaries.some((s) => s.hasData) ? sumSummaries(lastYearSummaries) : null;
 
-  // Spending groups: expense categories plus uncategorized one-offs
+  // Spending groups: expense categories plus uncategorized one-offs and unfiled card charges
   const spendGroups: SpendGroup[] = [
     ...categories
       .filter((c) => c.kind === "expense")
       .map((c) => ({ id: c.id, name: c.name, total: (m: string) => totalForCategoryMonth(ledger, c.id, m) })),
-    { id: "uncategorized", name: "Uncategorized one-offs", total: (m: string) => uncategorizedTotal(ledger, m) },
+    { id: "uncategorized", name: "Uncategorized", total: (m: string) => uncategorizedTotal(ledger, m) },
   ];
   const groupYearTotals = spendGroups
     .map((g) => ({ group: g, total: sumMoney(shownMonths.map(g.total)) }))

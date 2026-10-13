@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowDown, ArrowUp, FileSpreadsheet, Pencil, Plus } from "lucide-react";
+import { ArrowDown, ArrowUp, CreditCard, FileSpreadsheet, Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -90,6 +90,11 @@ export function Settings() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button asChild variant="outline" size="sm">
+            <Link to="/import/card">
+              <CreditCard /> Import Amex
+            </Link>
+          </Button>
           <Button asChild variant="outline" size="sm">
             <Link to="/settings/import">
               <FileSpreadsheet /> Import

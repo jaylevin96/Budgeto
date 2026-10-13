@@ -9,12 +9,15 @@ import {
   type MonthlyAmount,
   type OneOff,
 } from "@/lib/budget";
+import { fetchTransactions, type Transaction } from "@/lib/transactions";
 
 type State = {
   categories: Category[];
   items: LineItem[];
   amounts: MonthlyAmount[];
   oneOffs: OneOff[];
+  /** Card transactions, including excluded and one-off-covered ones */
+  transactions: Transaction[];
   loading: boolean;
   error: string | null;
 };
@@ -26,6 +29,7 @@ export function useBudget(fromKey: string, toKeyExclusive: string) {
     items: [],
     amounts: [],
     oneOffs: [],
+    transactions: [],
     loading: true,
     error: null,
   });
@@ -33,12 +37,13 @@ export function useBudget(fromKey: string, toKeyExclusive: string) {
   const load = useCallback(async () => {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const [structure, amounts, oneOffs] = await Promise.all([
+      const [structure, amounts, oneOffs, transactions] = await Promise.all([
         fetchStructure(),
         fetchAmounts(fromKey, toKeyExclusive),
         fetchOneOffs(fromKey, toKeyExclusive),
+        fetchTransactions(fromKey, toKeyExclusive),
       ]);
-      setState({ ...structure, amounts, oneOffs, loading: false, error: null });
+      setState({ ...structure, amounts, oneOffs, transactions, loading: false, error: null });
     } catch (err) {
       setState((s) => ({ ...s, loading: false, error: err instanceof Error ? err.message : "Failed to load" }));
     }
@@ -67,14 +72,26 @@ export function useBudget(fromKey: string, toKeyExclusive: string) {
   const applyOneOff = useCallback((id: string, saved: OneOff | null) => {
     setState((s) => {
       const rest = s.oneOffs.filter((o) => o.id !== id);
-      return { ...s, oneOffs: saved ? [...rest, saved] : rest };
+      return {
+        ...s,
+        oneOffs: saved ? [...rest, saved] : rest,
+        // Deleting a one-off frees the card charges it covered (the database does the same)
+        transactions: saved ? s.transactions : s.transactions.map((t) => (t.one_off_id === id ? { ...t, one_off_id: null } : t)),
+      };
+    });
+  }, []);
+
+  const applyTransactions = useCallback((saved: Transaction[]) => {
+    setState((s) => {
+      const byId = new Map(saved.map((t) => [t.id, t]));
+      return { ...s, transactions: s.transactions.map((t) => byId.get(t.id) ?? t) };
     });
   }, []);
 
   const ledger = useMemo(
-    () => buildLedger(state.categories, state.items, state.amounts, state.oneOffs),
-    [state.categories, state.items, state.amounts, state.oneOffs]
+    () => buildLedger(state.categories, state.items, state.amounts, state.oneOffs, state.transactions),
+    [state.categories, state.items, state.amounts, state.oneOffs, state.transactions]
   );
 
-  return { ...state, ledger, reload: load, applyAmount, applyAmounts, applyOneOff };
+  return { ...state, ledger, reload: load, applyAmount, applyAmounts, applyOneOff, applyTransactions };
 }

@@ -5,6 +5,7 @@ import {
   monthKey,
   sumMoney,
   summarizeMonth,
+  uncategorizedCard,
   type Ledger,
   type OneOff,
 } from "@/lib/budget";
@@ -16,8 +17,9 @@ type Cell = string | number | null;
 /**
  * Download a year as .xlsx in the same layout as the original budget spreadsheet:
  * one section per category (SECTION | JAN … DEC | YEAR, rows, Total), then TOTALS.
- * Line-item cells include their linked one-offs; category-only one-offs appear as rows
- * in their section. A second sheet lists every one-off. The file parses with the importer
+ * Line-item cells include their linked one-offs and card charges; category-only one-offs appear
+ * as rows in their section, and unfiled card charges in the Uncategorized section. Further
+ * sheets list every one-off and every card charge. The file parses with the importer
  * (one-offs come back as regular line items), so it is meant for backup or a fresh account,
  * not for re-importing into the same account (linked one-offs would be counted twice).
  */
@@ -54,14 +56,19 @@ export async function exportYear(year: number, L: Ledger): Promise<void> {
   }
 
   const uncategorized = months.flatMap((m) => L.uncategorized.get(m) ?? []);
-  if (uncategorized.length) {
-    pushSection(
-      "Uncategorized One-offs",
-      [...groupByName(uncategorized)].map(([name, list]) => ({
-        name,
-        values: months.map((m) => sumOrNull(list.filter((o) => o.month === m))),
-      }))
-    );
+  const unfiledCard = months.map((m) => uncategorizedCard(L, m));
+  if (uncategorized.length || unfiledCard.some((l) => l.length)) {
+    const lines = [...groupByName(uncategorized)].map(([name, list]) => ({
+      name,
+      values: months.map((m) => sumOrNull(list.filter((o) => o.month === m))),
+    }));
+    if (unfiledCard.some((l) => l.length)) {
+      lines.push({
+        name: "Unfiled card charges",
+        values: unfiledCard.map((l) => (l.length ? sumMoney(l.map((t) => t.amount)) : null)),
+      });
+    }
+    pushSection("Uncategorized", lines);
   }
 
   const summaries = months.map((m) => summarizeMonth(L, m));
@@ -93,9 +100,27 @@ export async function exportYear(year: number, L: Ledger): Promise<void> {
   const oneOffSheet = XLSX.utils.aoa_to_sheet(oneOffRows);
   oneOffSheet["!cols"] = [{ wch: 10 }, { wch: 28 }, { wch: 12 }, { wch: 20 }, { wch: 20 }, { wch: 40 }];
 
+  const oneOffName = new Map(L.oneOffs.map((o) => [o.id, o.name]));
+  const cardRows: Cell[][] = [["Date", "Merchant", "Amount", "Card member", "Counted as", "Amex category", "Description"]];
+  for (const t of L.transactions.filter((t) => t.month.startsWith(`${year}-`))) {
+    const item = t.line_item_id ? L.items.find((i) => i.id === t.line_item_id) : undefined;
+    const countedAs = t.excluded
+      ? "Not counted"
+      : t.one_off_id
+        ? `One-off: ${oneOffName.get(t.one_off_id) ?? "(other month)"}`
+        : item
+          ? `${catName.get(item.category_id) ?? ""} › ${item.name}`
+          : "Uncategorized";
+    cardRows.push([t.posted_on, t.merchant, t.amount, t.card_member ?? "", countedAs, t.source_category ?? "", t.description]);
+  }
+  const cardSheet = XLSX.utils.aoa_to_sheet(cardRows);
+  cardSheet["!cols"] = [{ wch: 11 }, { wch: 28 }, { wch: 12 }, { wch: 18 }, { wch: 32 }, { wch: 30 }, { wch: 44 }];
+  setMoneyFormat(XLSX, cardSheet, cardRows);
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, budgetSheet, "PERSONAL BUDGET");
   XLSX.utils.book_append_sheet(wb, oneOffSheet, "One-offs");
+  if (cardRows.length > 1) XLSX.utils.book_append_sheet(wb, cardSheet, "Card charges");
   XLSX.writeFile(wb, `Budgeto_${year}.xlsx`);
 }
 

@@ -1,12 +1,13 @@
 import { useCallback, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, Check, CheckCheck, MessageSquare, Plus, Settings2, ShoppingBag } from "lucide-react";
+import { AlertTriangle, Check, CheckCheck, CreditCard, MessageSquare, Plus, Settings2, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
 import { AmountInput } from "@/components/AmountInput";
 import { useCellSaver } from "@/hooks/useCellSaver";
 import { BudgetBar } from "@/components/BudgetBar";
+import { CardTransactionsDialog } from "@/components/CardTransactions";
 import { EmptyBudget } from "@/components/EmptyBudget";
 import { OneOffDialog } from "@/components/OneOffDialog";
 import { OneOffList } from "@/components/OneOffList";
@@ -20,6 +21,8 @@ import {
   currentMonthKey,
   formatMoney,
   formatMonth,
+  itemCard,
+  itemEntered,
   itemMonthTotal,
   itemOneOffs,
   KIND_LABEL,
@@ -31,11 +34,13 @@ import {
   summarizeMonth,
   sumMoney,
   totalForCategoryMonth,
+  uncategorizedCard,
   type Ledger,
   type LineItem,
   type MonthlyAmount,
   type OneOff,
 } from "@/lib/budget";
+import type { Transaction } from "@/lib/transactions";
 import { cn } from "@/lib/utils";
 
 type EditingOneOff = { oneOff: OneOff | null; category_id?: string | null; line_item_id?: string | null } | null;
@@ -46,12 +51,26 @@ export function MonthEntry() {
   const month = monthKeyFromSlug(params.month) ?? currentMonthKey();
 
   // Load the previous 12 months too, for suggestions and "usually about" hints
-  const { categories, items, oneOffs, ledger, loading, error, reload, applyAmount, applyAmounts, applyOneOff } =
-    useBudget(addMonths(month, -12), addMonths(month, 1));
+  const {
+    categories,
+    items,
+    oneOffs,
+    transactions,
+    ledger,
+    loading,
+    error,
+    reload,
+    applyAmount,
+    applyAmounts,
+    applyOneOff,
+    applyTransactions,
+  } = useBudget(addMonths(month, -12), addMonths(month, 1));
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [filling, setFilling] = useState(false);
   const [fillError, setFillError] = useState<string | null>(null);
   const [editingOneOff, setEditingOneOff] = useState<EditingOneOff>(null);
+  // Which card charges the dialog shows (a snapshot, so a reassigned charge stays in view)
+  const [cardDialog, setCardDialog] = useState<{ title: string; description: string; ids: Set<string> } | null>(null);
 
   const idx = ledger.idx;
   const activeCategories = categories.filter((c) => !c.archived);
@@ -59,9 +78,11 @@ export function MonthEntry() {
   const summary = summarizeMonth(ledger, month);
   const prevSummary = summarizeMonth(ledger, addMonths(month, -1));
   const monthOneOffs = oneOffs.filter((o) => o.month === month);
+  const unfiled = uncategorizedCard(ledger, month);
 
+  // Items paid by card this month don't get a typed suggestion (it would count twice)
   const pendingSuggestions = activeItems
-    .filter((i) => idx.get(i.id)?.get(month) === undefined)
+    .filter((i) => !itemEntered(ledger, i.id, month))
     .map((i) => ({ item: i, amount: suggestedAmount(i, month, idx) }))
     .filter((s): s is { item: LineItem; amount: number } => s.amount !== null);
 
@@ -94,7 +115,7 @@ export function MonthEntry() {
   }, []);
 
   const go = (delta: number) => navigate(`/month/${monthSlug(addMonths(month, delta))}`);
-  const enteredCount = activeItems.filter((i) => idx.get(i.id)?.has(month)).length;
+  const enteredCount = activeItems.filter((i) => itemEntered(ledger, i.id, month)).length;
 
   if (!loading && !error && categories.length === 0) return <EmptyBudget onSeeded={reload} />;
 
@@ -111,6 +132,11 @@ export function MonthEntry() {
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setEditingOneOff({ oneOff: null })}>
             <Plus /> One-off
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/import/card">
+              <CreditCard /> Import Amex
+            </Link>
           </Button>
           <Button asChild variant="ghost" size="sm">
             <Link to="/settings">
@@ -164,6 +190,36 @@ export function MonthEntry() {
               {fillError && <FormError>{fillError}</FormError>}
             </CardContent>
           </Card>
+
+          {unfiled.length > 0 && (
+            <Card className="border-[var(--color-warning)]">
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+                <p className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-[var(--color-warning)]" aria-hidden />
+                  <span>
+                    {unfiled.length} card {unfiled.length === 1 ? "charge isn't" : "charges aren't"} filed under a line
+                    item ({formatMoney(sumMoney(unfiled.map((t) => t.amount)), true)}).{" "}
+                    {unfiled.length === 1 ? "It counts" : "They count"} as uncategorized spending until you file{" "}
+                    {unfiled.length === 1 ? "it" : "them"}.
+                  </span>
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setCardDialog({
+                      title: `Unfiled card charges · ${formatMonth(month)}`,
+                      description:
+                        "Pick a line item for each. If you already entered a purchase as a one-off, link it so it isn't counted twice. Choose “Don't count” for anything that isn't household spending.",
+                      ids: new Set(unfiled.map((t) => t.id)),
+                    })
+                  }
+                >
+                  Review
+                </Button>
+              </CardContent>
+            </Card>
+          )}
         </>
       )}
 
@@ -173,7 +229,7 @@ export function MonthEntry() {
         <div ref={listRef} className="space-y-4">
           {activeCategories.map((cat) => {
             const catItems = activeItems.filter((i) => i.category_id === cat.id);
-            const visible = onlyMissing ? catItems.filter((i) => idx.get(i.id)?.get(month) === undefined) : catItems;
+            const visible = onlyMissing ? catItems.filter((i) => !itemEntered(ledger, i.id, month)) : catItems;
             const catOneOffs = categoryOneOffs(ledger, cat.id, month);
             if (!visible.length && (onlyMissing || !catOneOffs.length)) return null;
             const subtotal = totalForCategoryMonth(ledger, cat.id, month);
@@ -203,6 +259,13 @@ export function MonthEntry() {
                       onSaved={(saved) => applyAmount(item.id, month, saved)}
                       onEnter={focusNext}
                       onEditOneOff={(o) => setEditingOneOff({ oneOff: o })}
+                      onShowCard={(card) =>
+                        setCardDialog({
+                          title: `${item.name} · ${formatMonth(month)}`,
+                          description: "Card charges included in this line. Move any that belong elsewhere.",
+                          ids: new Set(card.map((t) => t.id)),
+                        })
+                      }
                     />
                   ))}
                 </ul>
@@ -256,6 +319,19 @@ export function MonthEntry() {
         </div>
       )}
 
+      {cardDialog && (
+        <CardTransactionsDialog
+          title={cardDialog.title}
+          description={cardDialog.description}
+          onClose={() => setCardDialog(null)}
+          transactions={transactions.filter((t) => cardDialog.ids.has(t.id))}
+          categories={categories}
+          items={items}
+          oneOffs={oneOffs}
+          onSaved={applyTransactions}
+        />
+      )}
+
       {editingOneOff && (
         <OneOffDialog
           oneOff={editingOneOff.oneOff}
@@ -280,6 +356,7 @@ function AmountRow({
   onSaved,
   onEnter,
   onEditOneOff,
+  onShowCard,
 }: {
   item: LineItem;
   month: string;
@@ -287,12 +364,14 @@ function AmountRow({
   onSaved: (saved: MonthlyAmount | null) => void;
   onEnter: (input: HTMLInputElement) => void;
   onEditOneOff: (o: OneOff) => void;
+  onShowCard: (card: Transaction[]) => void;
 }) {
   const idx = ledger.idx;
   const value = idx.get(item.id)?.get(month);
   const note = ledger.notes.get(item.id)?.get(month) ?? "";
   const linked = itemOneOffs(ledger, item.id, month);
-  const suggestion = value === undefined ? suggestedAmount(item, month, idx) : null;
+  const card = itemCard(ledger, item.id, month);
+  const suggestion = value === undefined && !card.length ? suggestedAmount(item, month, idx) : null;
   const saver = useCellSaver(item.id, month, value, onSaved);
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteText, setNoteText] = useState(note);
@@ -320,7 +399,9 @@ function AmountRow({
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
       <label htmlFor={inputId} className="min-w-0 flex-1">
-        <span className={cn("block truncate", value === undefined && "text-[var(--color-muted-foreground)]")}>
+        <span
+          className={cn("block truncate", value === undefined && !card.length && "text-[var(--color-muted-foreground)]")}
+        >
           {item.name}
         </span>
         {item.recurrence !== "none" && (
@@ -385,8 +466,14 @@ function AmountRow({
           />
         </div>
       )}
-      {linked.length > 0 && (
+      {(linked.length > 0 || card.length > 0) && (
         <div className="w-full space-y-0.5 text-right text-xs text-[var(--color-muted-foreground)]">
+          {card.length > 0 && (
+            <button type="button" className="inline-flex w-full items-center justify-end gap-1 hover:underline" onClick={() => onShowCard(card)}>
+              <CreditCard className="h-3 w-3" aria-hidden />+ {formatMoney(sumMoney(card.map((t) => t.amount)), true)} Amex (
+              {card.length} {card.length === 1 ? "charge" : "charges"})
+            </button>
+          )}
           {linked.map((o) => (
             <button key={o.id} type="button" className="block w-full text-right hover:underline" onClick={() => onEditOneOff(o)}>
               + {formatMoney(o.amount, true)} {o.name}
