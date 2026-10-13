@@ -24,12 +24,13 @@ import {
 } from "@/lib/transactions";
 import { cn } from "@/lib/utils";
 
-const NEW_ITEM = "__new";
+const NEW_ITEM = "__new_item";
+const NEW_CATEGORY = "__new_category";
 
 /**
  * Where a card charge goes: a line item, one of the month's one-offs ("already entered"),
- * uncategorized, or "don't count". With `onCreated`, it also offers "+ New line item…",
- * which creates the line item (and, optionally, a new category) and then picks it.
+ * uncategorized, or "don't count". With `onCreated`, it also offers "+ New category…" and
+ * "+ New line item…" near the top, which create the destination and then pick it.
  */
 export function DestinationSelect({
   value,
@@ -52,16 +53,23 @@ export function DestinationSelect({
   "aria-label"?: string;
   disabled?: boolean;
 }) {
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<"item" | "category" | null>(null);
   return (
     <>
       <Select
         value={value}
-        onChange={(e) => (e.target.value === NEW_ITEM ? setCreating(true) : onChange(e.target.value))}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === NEW_ITEM) setCreating("item");
+          else if (v === NEW_CATEGORY) setCreating("category");
+          else onChange(v);
+        }}
         className={cn("h-9", !value && "border-[var(--color-warning)]", className)}
         {...props}
       >
         <option value="">Uncategorized</option>
+        {onCreated && <option value={NEW_CATEGORY}>+ New category…</option>}
+        {onCreated && <option value={NEW_ITEM}>+ New line item…</option>}
         {categories
           .filter((c) => !c.archived)
           .map((c) => (
@@ -84,16 +92,16 @@ export function DestinationSelect({
             ))}
           </optgroup>
         )}
-        {onCreated && <option value={NEW_ITEM}>+ New line item…</option>}
         <option value={EXCLUDE}>Don't count</option>
       </Select>
       {creating && onCreated && (
-        <NewLineItemDialog
+        <NewDestinationDialog
+          startWithNewCategory={creating === "category"}
           categories={categories}
           items={items}
-          onClose={() => setCreating(false)}
+          onClose={() => setCreating(null)}
           onCreated={(created) => {
-            setCreating(false);
+            setCreating(null);
             onCreated(created);
             onChange(created.item.id);
           }}
@@ -103,40 +111,47 @@ export function DestinationSelect({
   );
 }
 
-const NEW_CATEGORY = "__new_category";
-
-/** Name a new spending line item and pick its category, or name a new category for it. */
-function NewLineItemDialog({
+/**
+ * Create where a charge goes: a new spending category (with a line item in it, named like the
+ * category unless you name it), or a new line item in an existing category.
+ */
+function NewDestinationDialog({
+  startWithNewCategory,
   categories,
   items,
   onClose,
   onCreated,
 }: {
+  startWithNewCategory: boolean;
   categories: Category[];
   items: LineItem[];
   onClose: () => void;
   onCreated: (created: CreatedStructure) => void;
 }) {
   const choices = categories.filter((c) => !c.archived && c.kind === "expense");
-  const [name, setName] = useState("");
-  const [categoryId, setCategoryId] = useState(choices[0]?.id ?? NEW_CATEGORY);
+  const [categoryId, setCategoryId] = useState(
+    startWithNewCategory || !choices.length ? NEW_CATEGORY : choices[0].id
+  );
   const [newCategory, setNewCategory] = useState("");
+  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isNewCategory = categoryId === NEW_CATEGORY;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return setError("Give the line item a name");
-    if (categoryId === NEW_CATEGORY && !newCategory.trim()) return setError("Name the new category");
+    if (isNewCategory && !newCategory.trim()) return setError("Name the new category");
+    // In a new category the line item can share its name ("Shopping" › "Shopping")
+    const itemName = name.trim() || (isNewCategory ? newCategory.trim() : "");
+    if (!itemName) return setError("Give the line item a name");
     setBusy(true);
     setError(null);
     try {
       onCreated(
-        await createLineItem(
-          name,
-          categoryId === NEW_CATEGORY ? { newCategoryName: newCategory } : { categoryId },
-          { categories, items }
-        )
+        await createLineItem(itemName, isNewCategory ? { newCategoryName: newCategory } : { categoryId }, {
+          categories,
+          items,
+        })
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create it");
@@ -148,39 +163,51 @@ function NewLineItemDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New line item</DialogTitle>
+          <DialogTitle>{isNewCategory ? "New category" : "New line item"}</DialogTitle>
           <DialogDescription>
-            Adds a spending line to your budget and files this charge there. Tick “remember” and later charges from
-            the same merchant go there too.
+            Adds it to your budget as spending and files this charge there. Tick “remember” and later charges from the
+            same merchant go there too.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="nli-name">Line item</Label>
-            <Input id="nli-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Home furnishings" autoFocus />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="nli-category">Category</Label>
-            <Select id="nli-category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+            <Label htmlFor="nd-category">Category</Label>
+            <Select id="nd-category" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+              <option value={NEW_CATEGORY}>+ New category…</option>
               {choices.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
               ))}
-              <option value={NEW_CATEGORY}>+ New category…</option>
             </Select>
           </div>
-          {categoryId === NEW_CATEGORY && (
+          {isNewCategory && (
             <div className="space-y-2">
-              <Label htmlFor="nli-new-category">New category name</Label>
+              <Label htmlFor="nd-new-category">New category name</Label>
               <Input
-                id="nli-new-category"
+                id="nd-new-category"
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
                 placeholder="e.g. Shopping"
+                autoFocus
               />
             </div>
           )}
+          <div className="space-y-2">
+            <Label htmlFor="nd-name">Line item{isNewCategory && " (optional)"}</Label>
+            <Input
+              id="nd-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={isNewCategory ? newCategory.trim() || "Same as the category" : "e.g. Home furnishings"}
+              autoFocus={!isNewCategory}
+            />
+            {isNewCategory && (
+              <p className="text-xs text-[var(--color-muted-foreground)]">
+                Charges are filed under a line item. Leave this empty to use the category's name.
+              </p>
+            )}
+          </div>
           <FormError>{error}</FormError>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose}>
