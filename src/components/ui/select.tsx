@@ -8,7 +8,7 @@ const Select = React.forwardRef<
   <select
     ref={ref}
     className={cn(
-      "flex h-10 w-full rounded-md border border-[var(--color-input)] bg-transparent px-3 py-2 text-base text-[var(--color-foreground)] ring-offset-[var(--color-background)]",
+      "flex h-10 w-full rounded-xl border border-[var(--color-input)] bg-[var(--color-card)] px-3 py-2 text-base text-[var(--color-foreground)] ring-offset-[var(--color-background)]",
       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)] focus-visible:ring-offset-2",
       "disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
       className

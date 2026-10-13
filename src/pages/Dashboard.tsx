@@ -158,7 +158,7 @@ export function Dashboard() {
         <div className="flex items-center gap-2">
           <Select
             aria-label="Month"
-            className="h-9 w-40"
+            className="h-9 w-40 rounded-full"
             value={selectedIdx}
             onChange={(e) => setMonth(Number(e.target.value))}
           >
@@ -182,8 +182,8 @@ export function Dashboard() {
         <p className="text-[var(--color-muted-foreground)]">Loading…</p>
       ) : (
         <>
-          <section className="space-y-2">
-            <h2 className="text-sm font-medium text-[var(--color-muted-foreground)]">{formatMonth(selectedMonth)}</h2>
+          <section className="space-y-3">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted-foreground)]">{formatMonth(selectedMonth)}</h2>
             <SummaryTiles current={current} previous={previous} compareLabel="vs last month" colors={colors} />
             {current.entered < items.filter((i) => !i.archived).length && current.entered > 0 && (
               <p className="text-xs text-[var(--color-muted-foreground)]">
@@ -195,8 +195,8 @@ export function Dashboard() {
             )}
           </section>
 
-          <section className="space-y-2">
-            <h2 className="text-sm font-medium text-[var(--color-muted-foreground)]">
+          <section className="space-y-3">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted-foreground)]">
               Year to date (Jan–{MONTH_SHORT[selectedIdx]} {year})
             </h2>
             <SummaryTiles
@@ -225,10 +225,10 @@ export function Dashboard() {
                     width={48}
                   />
                   <Tooltip content={<MoneyTooltip colors={colors} />} cursor={{ fill: colors.grid, opacity: 0.5 }} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} iconType="square" iconSize={10} formatter={legendText(colors)} />
-                  <Bar isAnimationActive={false} dataKey="Income" fill={colors.income} radius={[4, 4, 0, 0]} maxBarSize={22} />
-                  <Bar isAnimationActive={false} dataKey="Spending" fill={colors.spending} radius={[4, 4, 0, 0]} maxBarSize={22} />
-                  <Bar isAnimationActive={false} dataKey="Saved" fill={colors.savings} radius={[4, 4, 0, 0]} maxBarSize={22} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" iconSize={10} formatter={legendText(colors)} />
+                  <Bar isAnimationActive={false} dataKey="Income" fill={colors.income} radius={[6, 6, 0, 0]} maxBarSize={22} />
+                  <Bar isAnimationActive={false} dataKey="Spending" fill={colors.spending} radius={[6, 6, 0, 0]} maxBarSize={22} />
+                  <Bar isAnimationActive={false} dataKey="Saved" fill={colors.savings} radius={[6, 6, 0, 0]} maxBarSize={22} />
                   <Line
                     isAnimationActive={false}
                     dataKey="Left over"
@@ -261,7 +261,7 @@ export function Dashboard() {
                       width={48}
                     />
                     <Tooltip content={<MoneyTooltip colors={colors} showTotal />} cursor={{ fill: colors.grid, opacity: 0.5 }} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} iconType="square" iconSize={10} formatter={legendText(colors)} />
+                    <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" iconSize={10} formatter={legendText(colors)} />
                     {orderedSeries.map((c, i) => (
                       <Bar
                         isAnimationActive={false}
@@ -290,7 +290,7 @@ export function Dashboard() {
                     {breakdownScope === "month" ? formatMonth(selectedMonth) : `Jan–${MONTH_SHORT[selectedIdx]} ${year}`}
                   </CardDescription>
                 </div>
-                <div className="flex rounded-md border border-[var(--color-border)] p-0.5 text-xs" role="group">
+                <div className="flex rounded-full bg-[var(--color-muted)] p-1 text-xs" role="group">
                   {(["month", "year"] as const).map((s) => (
                     <button
                       key={s}
@@ -298,8 +298,8 @@ export function Dashboard() {
                       aria-pressed={breakdownScope === s}
                       onClick={() => setBreakdownScope(s)}
                       className={cn(
-                        "rounded px-2.5 py-1",
-                        breakdownScope === s && "bg-[var(--color-accent)] font-medium"
+                        "rounded-full px-3 py-1 font-semibold text-[var(--color-muted-foreground)]",
+                        breakdownScope === s && "bg-[var(--color-card)] text-[var(--color-foreground)] shadow-sm"
                       )}
                     >
                       {s === "month" ? "Month" : "YTD"}
@@ -323,7 +323,7 @@ export function Dashboard() {
                         tickLine={false}
                       />
                       <Tooltip content={<MoneyTooltip colors={colors} />} cursor={{ fill: colors.grid, opacity: 0.5 }} />
-                      <Bar isAnimationActive={false} dataKey="total" name="Spent" fill={colors.spending} radius={[0, 4, 4, 0]} maxBarSize={20}>
+                      <Bar isAnimationActive={false} dataKey="total" name="Spent" fill={colors.spending} radius={[0, 6, 6, 0]} maxBarSize={20}>
                         <LabelList
                           dataKey="total"
                           position="right"
@@ -398,14 +398,14 @@ function MoneyTooltip({
   const total = sumMoney(rows.map((p) => p.value as number));
   return (
     <div
-      className="min-w-40 rounded-md border px-3 py-2 text-xs shadow-md"
+      className="min-w-40 rounded-xl border px-3 py-2 text-xs shadow-lg"
       style={{ background: colors.tooltipBg, color: colors.tooltipText, borderColor: colors.grid }}
     >
       {label && <div className="mb-1 font-medium">{label}</div>}
       {[...rows].reverse().map((p) => (
         <div key={String(p.dataKey)} className="flex items-center justify-between gap-4">
           <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-sm" style={{ background: p.color }} aria-hidden />
+            <span className="h-2 w-2 rounded-full" style={{ background: p.color }} aria-hidden />
             {p.name}
           </span>
           <span className="tabular-nums">{formatMoney(p.value as number)}</span>

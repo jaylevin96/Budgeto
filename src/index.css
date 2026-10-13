@@ -1,61 +1,69 @@
+
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss";
 
 @theme inline {
-  --color-background: oklch(1 0 0);
-  --color-foreground: oklch(0.145 0 0);
-  --color-card: oklch(1 0 0);
-  --color-card-foreground: oklch(0.145 0 0);
-  --color-popover: oklch(1 0 0);
-  --color-popover-foreground: oklch(0.145 0 0);
-  --color-primary: oklch(0.205 0 0);
-  --color-primary-foreground: oklch(0.985 0 0);
-  --color-secondary: oklch(0.97 0 0);
-  --color-secondary-foreground: oklch(0.205 0 0);
-  --color-muted: oklch(0.97 0 0);
-  --color-muted-foreground: oklch(0.556 0 0);
-  --color-accent: oklch(0.97 0 0);
-  --color-accent-foreground: oklch(0.205 0 0);
-  --color-destructive: oklch(0.577 0.245 27.325);
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+}
+
+/* Budgeto palette: warm paper surfaces with a deep evergreen brand color */
+:root {
+  --color-background: oklch(0.975 0.008 95);
+  --color-foreground: oklch(0.24 0.025 165);
+  --color-card: oklch(0.995 0.004 95);
+  --color-card-foreground: oklch(0.24 0.025 165);
+  --color-popover: oklch(0.995 0.004 95);
+  --color-popover-foreground: oklch(0.24 0.025 165);
+  --color-primary: oklch(0.43 0.085 163);
+  --color-primary-foreground: oklch(0.98 0.012 95);
+  --color-secondary: oklch(0.945 0.014 120);
+  --color-secondary-foreground: oklch(0.3 0.04 165);
+  --color-muted: oklch(0.945 0.014 120);
+  --color-muted-foreground: oklch(0.5 0.022 160);
+  --color-accent: oklch(0.93 0.035 155);
+  --color-accent-foreground: oklch(0.33 0.075 163);
+  --color-destructive: oklch(0.56 0.2 27);
   --color-destructive-foreground: oklch(0.985 0 0);
-  --color-success: oklch(0.527 0.154 150.069);
+  --color-success: oklch(0.52 0.13 155);
   --color-success-foreground: oklch(0.985 0 0);
   --color-warning: oklch(0.555 0.146 49);
-  --color-border: oklch(0.922 0 0);
-  --color-input: oklch(0.922 0 0);
-  --color-ring: oklch(0.708 0 0);
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
+  --color-border: oklch(0.9 0.014 110);
+  --color-input: oklch(0.87 0.016 110);
+  --color-ring: oklch(0.6 0.1 163);
 }
 
-/* Dark theme (night mode) */
+/* Dark theme (night mode): deep green-black with a mint brand color */
 [data-theme="dark"] {
-  --color-background: oklch(0.145 0 0);
-  --color-foreground: oklch(0.985 0 0);
-  --color-card: oklch(0.205 0 0);
-  --color-card-foreground: oklch(0.985 0 0);
-  --color-popover: oklch(0.205 0 0);
-  --color-popover-foreground: oklch(0.985 0 0);
-  --color-primary: oklch(0.985 0 0);
-  --color-primary-foreground: oklch(0.205 0 0);
-  --color-secondary: oklch(0.26 0 0);
-  --color-secondary-foreground: oklch(0.985 0 0);
-  --color-muted: oklch(0.26 0 0);
-  --color-muted-foreground: oklch(0.708 0 0);
-  --color-accent: oklch(0.26 0 0);
-  --color-accent-foreground: oklch(0.985 0 0);
-  --color-destructive: oklch(0.577 0.245 27.325);
+  --color-background: oklch(0.17 0.012 170);
+  --color-foreground: oklch(0.95 0.01 95);
+  --color-card: oklch(0.21 0.014 170);
+  --color-card-foreground: oklch(0.95 0.01 95);
+  --color-popover: oklch(0.21 0.014 170);
+  --color-popover-foreground: oklch(0.95 0.01 95);
+  --color-primary: oklch(0.8 0.12 160);
+  --color-primary-foreground: oklch(0.2 0.03 170);
+  --color-secondary: oklch(0.26 0.016 170);
+  --color-secondary-foreground: oklch(0.95 0.01 95);
+  --color-muted: oklch(0.26 0.016 170);
+  --color-muted-foreground: oklch(0.7 0.018 150);
+  --color-accent: oklch(0.29 0.04 165);
+  --color-accent-foreground: oklch(0.88 0.08 160);
+  --color-destructive: oklch(0.65 0.19 25);
   --color-destructive-foreground: oklch(0.985 0 0);
-  --color-success: oklch(0.696 0.17 162.48);
-  --color-success-foreground: oklch(0.145 0 0);
+  --color-success: oklch(0.72 0.15 160);
+  --color-success-foreground: oklch(0.17 0.012 170);
   --color-warning: oklch(0.82 0.15 75);
-  --color-border: oklch(0.32 0 0);
-  --color-input: oklch(0.32 0 0);
-  --color-ring: oklch(0.556 0 0);
+  --color-border: oklch(0.3 0.016 170);
+  --color-input: oklch(0.34 0.018 170);
+  --color-ring: oklch(0.7 0.11 160);
 }
 
-/* Force header logo and nav links to use foreground in dark mode (overrides base anchor styles) */
-[data-theme="dark"] header a {
+/* Keep app-shell links on theme ink in dark mode (overrides base anchor styles) */
+[data-theme="dark"] :is(header, aside, nav) a:not([aria-current="page"]) {
   color: var(--color-foreground);
 }
 
@@ -81,4 +89,7 @@
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
 }

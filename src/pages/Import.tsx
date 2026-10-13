@@ -91,7 +91,7 @@ export function Import() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-[var(--color-input)] p-6 text-sm hover:bg-[var(--color-accent)]">
+          <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-[var(--color-input)] p-8 text-sm hover:bg-[var(--color-accent)]">
             <Upload className="h-4 w-4" />
             {fileName || "Choose a .xlsx file"}
             <input
