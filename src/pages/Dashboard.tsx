@@ -20,7 +20,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { FormError } from "@/components/ui/form-message";
 import { BudgetBar } from "@/components/BudgetBar";
 import { EmptyBudget } from "@/components/EmptyBudget";
-import { OneOffDialog } from "@/components/OneOffDialog";
+import { EntriesDialog, type EntriesPeriod } from "@/components/EntriesDialog";
 import { StepperNav } from "@/components/StepperNav";
 import { SummaryTiles } from "@/components/SummaryTiles";
 import { useBudget } from "@/hooks/useBudget";
@@ -33,6 +33,7 @@ import {
   formatMoneyCompact,
   formatMonth,
   itemMonthTotal,
+  ledgerEntries,
   monthKey,
   monthSlug,
   MONTH_SHORT,
@@ -41,7 +42,7 @@ import {
   sumMoney,
   totalForCategoryMonth,
   uncategorizedTotal,
-  type OneOff,
+  type EntryScope,
   type MonthSummary,
 } from "@/lib/budget";
 import { countsOnItsOwn, formatDay } from "@/lib/transactions";
@@ -56,11 +57,8 @@ export function Dashboard() {
   const thisYear = parseMonthKey(thisMonth).year;
   const year = Number(searchParams.get("year")) || thisYear;
 
-  const { categories, items, oneOffs, recurring, ledger, loading, error, reload, refresh, applyOneOff } = useBudget(
-    monthKey(year - 1, 0),
-    monthKey(year + 1, 0)
-  );
-  const [editingOneOff, setEditingOneOff] = useState<OneOff | null>(null);
+  const { categories, items, oneOffs, ledger, loading, error, reload } = useBudget(monthKey(year - 1, 0), monthKey(year + 1, 0));
+  const [entriesView, setEntriesView] = useState<EntriesView | null>(null);
 
   const months = Array.from({ length: 12 }, (_, m) => monthKey(year, m));
   const summaries = months.map((m) => summarizeMonth(ledger, m));
@@ -91,8 +89,18 @@ export function Dashboard() {
   const spendGroups: SpendGroup[] = [
     ...categories
       .filter((c) => c.kind === "expense")
-      .map((c) => ({ id: c.id, name: c.name, total: (m: string) => totalForCategoryMonth(ledger, c.id, m) })),
-    { id: "uncategorized", name: "Uncategorized", total: (m: string) => uncategorizedTotal(ledger, m) },
+      .map((c): SpendGroup => ({
+        id: c.id,
+        name: c.name,
+        scope: { kind: "category", id: c.id },
+        total: (m: string) => totalForCategoryMonth(ledger, c.id, m),
+      })),
+    {
+      id: "uncategorized",
+      name: "Uncategorized",
+      scope: { kind: "uncategorized" },
+      total: (m: string) => uncategorizedTotal(ledger, m),
+    },
   ];
   const groupYearTotals = spendGroups
     .map((g) => ({ group: g, total: sumMoney(shownMonths.map(g.total)) }))
@@ -126,7 +134,7 @@ export function Dashboard() {
 
   const breakdownFor = (ms: string[]) =>
     spendGroups
-      .map((g) => ({ name: g.name, total: sumMoney(ms.map(g.total)) }))
+      .map((g) => ({ name: g.name, scope: g.scope, total: sumMoney(ms.map(g.total)) }))
       .filter((c) => c.total > 0)
       .sort((a, b) => b.total - a.total);
   const yearBreakdown = breakdownFor(shownMonths);
@@ -171,16 +179,35 @@ export function Dashboard() {
         name: t.merchant || t.description,
         detail: `${formatDay(t.posted_on)} · ${place.name}`,
         amount: t.amount,
-        oneOff: null,
+        manual: false,
       })),
     ...oneOffs
       .filter((o) => o.month === selectedMonth && !o.recurring_id && o.amount > 0)
       .map((o) => ({ o, place: placeOf(o.line_item_id, o.category_id) }))
       .filter(({ place }) => isSpending(place.kind))
-      .map(({ o, place }) => ({ id: o.id, name: o.name, detail: `Manual entry · ${place.name}`, amount: o.amount, oneOff: o })),
+      .map(({ o, place }) => ({ id: o.id, name: o.name, detail: `Manual entry · ${place.name}`, amount: o.amount, manual: true })),
   ]
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 8);
+
+  /** Open the entries behind a category (or Uncategorized) total for the selected month. */
+  function showGroupEntries(name: string, scope: EntryScope) {
+    setEntriesView({
+      title: name,
+      description: `Everything that adds up to ${name} in ${formatMonth(selectedMonth)}.`,
+      periods: [{ month: selectedMonth, entries: ledgerEntries(ledger, scope, selectedMonth) }],
+      showItem: scope.kind === "category",
+    });
+  }
+  /** Open a line item's entries for the previous month next to the selected month. */
+  function showChangeEntries(c: (typeof changes)[number]) {
+    const scope = { kind: "item" as const, id: c.item.id };
+    setEntriesView({
+      title: c.item.name,
+      description: `${formatMoney(c.before)} in ${formatMonth(prevMonth, "short")} → ${formatMoney(c.now)} in ${formatMonth(selectedMonth, "short")} (${c.delta > 0 ? "+" : "−"}${formatMoney(Math.abs(c.delta))}).`,
+      periods: [prevMonth, selectedMonth].map((m) => ({ month: m, entries: ledgerEntries(ledger, scope, m) })),
+    });
+  }
 
   function setYear(y: number) {
     setSearchParams({ view: "year", year: String(y) });
@@ -384,9 +411,10 @@ export function Dashboard() {
               <div className="grid gap-6 lg:grid-cols-2">
                 <BreakdownCard
                   title="Where the money went"
-                  description={formatMonth(selectedMonth)}
+                  description={`${formatMonth(selectedMonth)}. Click a category to see its entries.`}
                   rows={monthBreakdown}
                   colors={colors}
+                  onSelect={(row) => showGroupEntries(row.name, row.scope)}
                 />
 
                 <Card>
@@ -403,28 +431,15 @@ export function Dashboard() {
                   {purchases.length > 0 && (
                     <ul className="divide-y divide-[var(--color-border)] pb-2">
                       {purchases.map((p) => {
-                        const Icon = p.oneOff ? PenLine : CreditCard;
-                        const content = (
-                          <>
+                        const Icon = p.manual ? PenLine : CreditCard;
+                        return (
+                          <li key={p.id} className="flex items-center gap-3 px-6 py-2 text-sm">
                             <Icon className="h-4 w-4 shrink-0 text-[var(--color-muted-foreground)]" aria-hidden />
                             <span className="min-w-0 flex-1">
                               <span className="block truncate font-medium">{p.name}</span>
                               <span className="block truncate text-xs text-[var(--color-muted-foreground)]">{p.detail}</span>
                             </span>
                             <span className="font-medium tabular-nums">{formatMoney(p.amount, true)}</span>
-                          </>
-                        );
-                        return (
-                          <li key={p.id}>
-                            {p.oneOff ? (
-                              <button type="button" className={purchaseRowClass} onClick={() => setEditingOneOff(p.oneOff)}>
-                                {content}
-                              </button>
-                            ) : (
-                              <Link to={monthLink} className={purchaseRowClass}>
-                                {content}
-                              </Link>
-                            )}
                           </li>
                         );
                       })}
@@ -451,9 +466,13 @@ export function Dashboard() {
                     ) : (
                       budgetRows.map((r) => (
                         <div key={r.cat.id}>
-                          <Link to={monthLink} className="mb-1 block text-sm font-medium hover:underline">
+                          <button
+                            type="button"
+                            className="mb-1 block text-left text-sm font-medium hover:underline"
+                            onClick={() => showGroupEntries(r.cat.name, { kind: "category", id: r.cat.id })}
+                          >
                             {r.cat.name}
-                          </Link>
+                          </button>
                           <BudgetBar spent={r.spent} budget={r.budget} />
                         </div>
                       ))
@@ -464,7 +483,9 @@ export function Dashboard() {
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-lg">Biggest changes vs {formatMonth(prevMonth, "short")}</CardTitle>
-                    <CardDescription>Spending line items that moved the most in {formatMonth(selectedMonth)}.</CardDescription>
+                    <CardDescription>
+                      Spending line items that moved the most in {formatMonth(selectedMonth)}. Click one to compare its entries.
+                    </CardDescription>
                   </CardHeader>
                   <CardContent>
                     {changes.length === 0 ? (
@@ -472,19 +493,23 @@ export function Dashboard() {
                     ) : (
                       <ul className="divide-y divide-[var(--color-border)]">
                         {changes.map((c) => (
-                          <li key={c.item.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                            <Link to={monthLink} className="truncate hover:underline">
-                              {c.item.name}
-                            </Link>
-                            <span className="flex items-center gap-3 tabular-nums">
-                              <span className="text-[var(--color-muted-foreground)]">
-                                {formatMoney(c.before)} → {formatMoney(c.now)}
+                          <li key={c.item.id}>
+                            <button
+                              type="button"
+                              onClick={() => showChangeEntries(c)}
+                              className="-mx-2 flex w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-md px-2 py-2 text-left text-sm hover:bg-[var(--color-accent)]"
+                            >
+                              <span className="truncate font-medium">{c.item.name}</span>
+                              <span className="flex items-center gap-3 tabular-nums">
+                                <span className="text-[var(--color-muted-foreground)]">
+                                  {formatMoney(c.before)} → {formatMoney(c.now)}
+                                </span>
+                                <span className="w-20 text-right font-medium">
+                                  {c.delta > 0 ? "+" : "−"}
+                                  {formatMoney(Math.abs(c.delta))}
+                                </span>
                               </span>
-                              <span className="w-20 text-right font-medium">
-                                {c.delta > 0 ? "+" : "−"}
-                                {formatMoney(Math.abs(c.delta))}
-                              </span>
-                            </span>
+                            </button>
                           </li>
                         ))}
                       </ul>
@@ -496,24 +521,7 @@ export function Dashboard() {
           )}
         </>
       )}
-      {editingOneOff && (
-        <OneOffDialog
-          oneOff={editingOneOff}
-          defaults={{ month: editingOneOff.month }}
-          categories={categories}
-          items={items}
-          recurring={recurring}
-          onClose={() => setEditingOneOff(null)}
-          onRecurringChanged={() => {
-            setEditingOneOff(null);
-            refresh();
-          }}
-          onSaved={(id, saved) => {
-            setEditingOneOff(null);
-            applyOneOff(id, saved);
-          }}
-        />
-      )}
+      {entriesView && <EntriesDialog {...entriesView} onClose={() => setEntriesView(null)} />}
     </div>
   );
 }
@@ -560,9 +568,11 @@ function ViewTabs({ view, onChange }: { view: View; onChange: (v: View) => void 
   );
 }
 
-type Purchase = { id: string; name: string; detail: string; amount: number; oneOff: OneOff | null };
+type Purchase = { id: string; name: string; detail: string; amount: number; manual: boolean };
 
-const purchaseRowClass = "flex w-full items-center gap-3 px-6 py-2 text-left text-sm hover:bg-[var(--color-accent)]";
+type EntriesView = { title: string; description: string; periods: EntriesPeriod[]; showItem?: boolean };
+
+type BreakdownRow = { name: string; scope: EntryScope; total: number };
 
 /** Horizontal bars of spending per category for a period. */
 function BreakdownCard({
@@ -570,12 +580,29 @@ function BreakdownCard({
   description,
   rows,
   colors,
+  onSelect,
 }: {
   title: string;
   description: string;
-  rows: { name: string; total: number }[];
+  rows: BreakdownRow[];
   colors: ChartColors;
+  /** Clicking a category's row opens it; without this the chart isn't clickable */
+  onSelect?: (row: BreakdownRow) => void;
 }) {
+  const yTick = (props: { x: number; y: number; payload: { value: string; index: number } }) => (
+    <text
+      x={props.x}
+      y={props.y}
+      dy={4}
+      textAnchor="end"
+      fontSize={12}
+      fill={colors.axis}
+      className={onSelect ? "cursor-pointer hover:underline" : undefined}
+      onClick={onSelect ? () => onSelect(rows[props.payload.index]) : undefined}
+    >
+      {props.payload.value}
+    </text>
+  );
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -587,13 +614,26 @@ function BreakdownCard({
           <p className="p-4 text-sm text-[var(--color-muted-foreground)]">No spending entered yet.</p>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={rows} layout="vertical" margin={{ top: 0, right: 64, left: 0, bottom: 0 }}>
+            <BarChart
+              data={rows}
+              layout="vertical"
+              margin={{ top: 0, right: 64, left: 0, bottom: 0 }}
+              onClick={
+                onSelect
+                  ? (state: { activeTooltipIndex?: number } | null) => {
+                      const row = state?.activeTooltipIndex != null ? rows[state.activeTooltipIndex] : undefined;
+                      if (row) onSelect(row);
+                    }
+                  : undefined
+              }
+              className={onSelect ? "cursor-pointer" : undefined}
+            >
               <XAxis type="number" hide />
               <YAxis
                 type="category"
                 dataKey="name"
                 width={120}
-                tick={{ fill: colors.axis, fontSize: 12 }}
+                tick={yTick}
                 axisLine={false}
                 tickLine={false}
               />
@@ -614,7 +654,7 @@ function BreakdownCard({
   );
 }
 
-type SpendGroup = { id: string; name: string; total: (month: string) => number };
+type SpendGroup = { id: string; name: string; scope: EntryScope; total: (month: string) => number };
 
 /** Legend labels in text ink, not the series color; the swatch carries identity. */
 function legendText(colors: ChartColors) {

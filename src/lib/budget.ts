@@ -450,6 +450,65 @@ export function hasUncategorized(L: Ledger, month: string): boolean {
   return (L.uncategorized.get(month) ?? []).length > 0 || uncategorizedCard(L, month).length > 0;
 }
 
+/** What a set of entries belongs to: a category (its line items plus its "Other" row), one line item, or uncategorized */
+export type EntryScope = { kind: "category"; id: string } | { kind: "item"; id: string } | { kind: "uncategorized" };
+
+/** One manual entry or counted card charge, as listed in a breakdown */
+export type LedgerEntry = {
+  id: string;
+  name: string;
+  amount: number;
+  /** Posting date for card charges; null for manual entries */
+  postedOn: string | null;
+  /** Line item it rolls into, or null when filed to the category itself (or nowhere) */
+  itemName: string | null;
+  source: "card" | "manual" | "recurring";
+  oneOff: OneOff | null;
+};
+
+/** The entries that make up a scope's total for a month, largest first. They sum to the matching *Total function. */
+export function ledgerEntries(L: Ledger, scope: EntryScope, month: string): LedgerEntry[] {
+  const fromOneOff = (o: OneOff, itemName: string | null): LedgerEntry => ({
+    id: o.id,
+    name: o.name,
+    amount: o.amount,
+    postedOn: null,
+    itemName,
+    source: o.recurring_id ? "recurring" : "manual",
+    oneOff: o,
+  });
+  const fromCard = (t: Transaction, itemName: string | null): LedgerEntry => ({
+    id: t.id,
+    name: t.merchant || t.description,
+    amount: t.amount,
+    postedOn: t.posted_on,
+    itemName,
+    source: "card",
+    oneOff: null,
+  });
+  const forItem = (item: LineItem) => [
+    ...itemOneOffs(L, item.id, month).map((o) => fromOneOff(o, item.name)),
+    ...itemCard(L, item.id, month).map((t) => fromCard(t, item.name)),
+  ];
+  let entries: LedgerEntry[];
+  if (scope.kind === "item") {
+    const item = L.items.find((i) => i.id === scope.id);
+    entries = item ? forItem(item) : [];
+  } else if (scope.kind === "category") {
+    entries = [
+      ...L.items.filter((i) => i.category_id === scope.id).flatMap(forItem),
+      ...categoryOneOffs(L, scope.id, month).map((o) => fromOneOff(o, null)),
+      ...categoryCard(L, scope.id, month).map((t) => fromCard(t, null)),
+    ];
+  } else {
+    entries = [
+      ...(L.uncategorized.get(month) ?? []).map((o) => fromOneOff(o, null)),
+      ...uncategorizedCard(L, month).map((t) => fromCard(t, null)),
+    ];
+  }
+  return entries.sort((a, b) => b.amount - a.amount);
+}
+
 export type MonthSummary = {
   month: string;
   income: number;
