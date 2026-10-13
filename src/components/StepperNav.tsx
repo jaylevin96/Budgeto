@@ -15,6 +15,7 @@ export function StepperNav({
   picker,
   onToday,
   todayLabel = "Today",
+  size = "lg",
 }: {
   label: React.ReactNode;
   onPrev: () => void;
@@ -24,12 +25,18 @@ export function StepperNav({
   picker?: PeriodPickerProps;
   onToday?: () => void;
   todayLabel?: string;
+  /** "md" renders a smaller h2, for a section inside a page */
+  size?: "lg" | "md";
 }) {
-  const heading = "font-display text-3xl font-semibold tracking-tight sm:text-4xl";
+  const Heading = size === "lg" ? "h1" : "h2";
+  const heading =
+    size === "lg"
+      ? "font-display text-3xl font-semibold tracking-tight sm:text-4xl"
+      : "font-display text-2xl font-semibold tracking-tight sm:text-3xl";
   return (
     <div className="flex items-center gap-3">
       {picker ? (
-        <h1 className={heading}>
+        <Heading className={heading}>
           <PeriodPicker {...picker}>
             <button
               type="button"
@@ -43,9 +50,9 @@ export function StepperNav({
               />
             </button>
           </PeriodPicker>
-        </h1>
+        </Heading>
       ) : (
-        <h1 className={heading}>{label}</h1>
+        <Heading className={heading}>{label}</Heading>
       )}
       <div className="flex items-center gap-1">
         <Button variant="outline" size="icon" className="h-8 w-8" onClick={onPrev} aria-label={prevLabel}>

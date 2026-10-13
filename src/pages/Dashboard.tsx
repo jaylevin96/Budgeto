@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   Bar,
@@ -15,14 +15,13 @@ import {
   YAxis,
   type TooltipProps,
 } from "recharts";
-import { ArrowRight, PencilLine, ShoppingBag, X } from "lucide-react";
+import { CreditCard, PencilLine, PenLine, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
 import { BudgetBar } from "@/components/BudgetBar";
 import { EmptyBudget } from "@/components/EmptyBudget";
 import { OneOffDialog } from "@/components/OneOffDialog";
-import { OneOffList } from "@/components/OneOffList";
 import { StepperNav } from "@/components/StepperNav";
 import { SummaryTiles } from "@/components/SummaryTiles";
 import { useBudget } from "@/hooks/useBudget";
@@ -45,6 +44,7 @@ import {
   type OneOff,
   type MonthSummary,
 } from "@/lib/budget";
+import { countsOnItsOwn, formatDay } from "@/lib/transactions";
 
 const MAX_CATEGORY_SERIES = 7; // 8th slot is "Other"
 
@@ -66,28 +66,23 @@ export function Dashboard() {
   const lastWithData = [...summaries].reverse().find((s) => s.hasData)?.month ?? null;
   const shownMonths = lastWithData ? months.filter((m) => m <= lastWithData) : months;
 
-  // With ?month= the dashboard focuses that month; without it, it shows the year so far
+  // The month the lower half of the page shows (?month=, else the latest month with data)
   const monthParam = searchParams.get("month");
-  const focusMonth =
+  const selectedMonth =
     monthParam && /^\d{1,2}$/.test(monthParam) && +monthParam >= 1 && +monthParam <= 12
       ? monthKey(year, +monthParam - 1)
-      : null;
-  // The month "Enter" and "Biggest changes" use when no month is focused
-  const refMonth = focusMonth ?? lastWithData ?? (thisYear === year ? thisMonth : monthKey(year, 11));
-  const refIdx = parseMonthKey(refMonth).month;
-  const periodMonths = focusMonth ? [focusMonth] : shownMonths;
+      : (lastWithData ?? (thisYear === year ? thisMonth : monthKey(year, 11)));
+  const selectedIdx = parseMonthKey(selectedMonth).month;
+  const monthLink = `/month/${monthSlug(selectedMonth)}`;
   const lastShownIdx = shownMonths.length - 1;
-  const periodLabel = focusMonth ? formatMonth(focusMonth) : `Jan–${MONTH_SHORT[lastShownIdx]} ${year}`;
-  const periodLink = focusMonth ? `/month/${monthSlug(focusMonth)}` : `/year/${year}`;
+  const yearLabel = `Jan–${MONTH_SHORT[lastShownIdx]} ${year}`;
 
-  const current = focusMonth ? summaries[refIdx] : sumSummaries(summaries.slice(0, lastShownIdx + 1));
-  // A month compares with the month before; the year so far with the same months last year
+  // Year so far vs the same months last year; the month vs the month before
+  const yearSummary = sumSummaries(summaries.slice(0, lastShownIdx + 1));
   const lastYearSummaries = shownMonths.map((_, m) => summarizeMonth(ledger, monthKey(year - 1, m)));
-  const previous = focusMonth
-    ? summarizeMonth(ledger, addMonths(focusMonth, -1))
-    : lastYearSummaries.some((s) => s.hasData)
-      ? sumSummaries(lastYearSummaries)
-      : null;
+  const lastYearSummary = lastYearSummaries.some((s) => s.hasData) ? sumSummaries(lastYearSummaries) : null;
+  const monthSummary = summaries[selectedIdx];
+  const prevMonthSummary = summarizeMonth(ledger, addMonths(selectedMonth, -1));
 
   // Spending groups: expense categories plus uncategorized entries and unfiled card charges
   const spendGroups: SpendGroup[] = [
@@ -126,17 +121,20 @@ export function Dashboard() {
     return row;
   });
 
-  const breakdown = spendGroups
-    .map((g) => ({ name: g.name, total: sumMoney(periodMonths.map(g.total)) }))
-    .filter((c) => c.total > 0)
-    .sort((a, b) => b.total - a.total);
+  const breakdownFor = (ms: string[]) =>
+    spendGroups
+      .map((g) => ({ name: g.name, total: sumMoney(ms.map(g.total)) }))
+      .filter((c) => c.total > 0)
+      .sort((a, b) => b.total - a.total);
+  const yearBreakdown = breakdownFor(shownMonths);
+  const monthBreakdown = breakdownFor([selectedMonth]);
 
   // Biggest line-item moves vs the previous month
-  const prevMonth = addMonths(refMonth, -1);
+  const prevMonth = addMonths(selectedMonth, -1);
   const changes = items
     .filter((i) => ledger.kindByCategory.get(i.category_id) === "expense")
     .map((i) => {
-      const now = itemMonthTotal(ledger, i.id, refMonth);
+      const now = itemMonthTotal(ledger, i.id, selectedMonth);
       const before = itemMonthTotal(ledger, i.id, prevMonth);
       return { item: i, now: now ?? 0, before: before ?? 0, delta: (now ?? 0) - (before ?? 0), known: now !== undefined };
     })
@@ -144,49 +142,62 @@ export function Dashboard() {
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
     .slice(0, 6);
 
-  // Budget vs actual for categories that have a monthly budget
+  // Budget vs actual for the month, for categories that have a monthly budget
   const budgetRows = categories
     .filter((c) => c.monthly_budget != null && c.kind !== "income" && !c.archived)
-    .map((c) => ({
-      cat: c,
-      budget: sumMoney(periodMonths.map(() => c.monthly_budget!)),
-      spent: sumMoney(periodMonths.map((m) => totalForCategoryMonth(ledger, c.id, m))),
-    }));
+    .map((c) => ({ cat: c, budget: c.monthly_budget!, spent: totalForCategoryMonth(ledger, c.id, selectedMonth) }));
   const budgetRemaining = sumMoney([...budgetRows.map((r) => r.budget), ...budgetRows.map((r) => -r.spent)]);
 
-  const activeItemCount = items.filter((i) => !i.archived).length;
-
-  // Biggest one-time spending: skip repeating entries (rent, wages) and income/savings
-  const bigPurchases = oneOffs
-    .filter(
-      (o) =>
-        o.month.startsWith(`${year}-`) &&
-        !o.repeats &&
-        (!o.category_id || ledger.kindByCategory.get(o.category_id) === "expense")
-    )
+  // Biggest purchases this month: counted card charges and one-time manual entries, spending only
+  const itemById = new Map(items.map((i) => [i.id, i]));
+  const catById = new Map(categories.map((c) => [c.id, c]));
+  const placeOf = (lineItemId: string | null, categoryId: string | null) => {
+    const item = lineItemId ? itemById.get(lineItemId) : undefined;
+    const cat = catById.get(item?.category_id ?? categoryId ?? "");
+    return { kind: cat?.kind, name: item?.name ?? cat?.name ?? "Uncategorized" };
+  };
+  const isSpending = (kind: string | undefined) => !kind || kind === "expense";
+  const purchases: Purchase[] = [
+    ...ledger.transactions
+      .filter((t) => t.month === selectedMonth && countsOnItsOwn(t) && t.amount > 0)
+      .map((t) => ({ t, place: placeOf(t.line_item_id, t.category_id) }))
+      .filter(({ place }) => isSpending(place.kind))
+      .map(({ t, place }) => ({
+        id: t.id,
+        name: t.merchant || t.description,
+        detail: `${formatDay(t.posted_on)} · ${place.name}`,
+        amount: t.amount,
+        oneOff: null,
+      })),
+    ...oneOffs
+      .filter((o) => o.month === selectedMonth && !o.repeats && o.amount > 0)
+      .map((o) => ({ o, place: placeOf(o.line_item_id, o.category_id) }))
+      .filter(({ place }) => isSpending(place.kind))
+      .map(({ o, place }) => ({ id: o.id, name: o.name, detail: `Manual entry · ${place.name}`, amount: o.amount, oneOff: o })),
+  ]
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 8);
+
+  const activeItemCount = items.filter((i) => !i.archived).length;
 
   function setYear(y: number) {
     setSearchParams({ year: String(y) });
   }
-  function selectMonth(key: string) {
+  const monthSectionRef = useRef<HTMLElement>(null);
+  function selectMonth(key: string, reveal = false) {
     const { year: y, month: m } = parseMonthKey(key);
     setSearchParams({ year: String(y), month: String(m + 1) }, { preventScrollReset: true });
-  }
-  function clearMonth() {
-    setSearchParams({ year: String(year) }, { preventScrollReset: true });
-  }
-  // Clicking a month focuses it; clicking the focused month again goes back to the whole year
-  function toggleMonth(m: string) {
-    if (m === focusMonth) clearMonth();
-    else selectMonth(m);
+    // From the charts, bring the month section into view if it's below the fold
+    const el = monthSectionRef.current;
+    if (reveal && el && el.getBoundingClientRect().top > window.innerHeight * 0.6) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
   function onChartClick(state: { activeTooltipIndex?: number } | null) {
     const m = state?.activeTooltipIndex != null ? shownMonths[state.activeTooltipIndex] : undefined;
-    if (m) toggleMonth(m);
+    if (m) selectMonth(m, true);
   }
-  const dim = (m: string) => (!focusMonth || m === focusMonth ? 1 : 0.35);
+  const dim = (m: string) => (m === selectedMonth ? 1 : 0.4);
   const monthCells = shownMonths.map((m) => <Cell key={m} fillOpacity={dim(m)} />);
   const monthTick = (props: { x: number; y: number; payload: { value: string; index: number } }) => {
     const m = shownMonths[props.payload.index];
@@ -197,10 +208,10 @@ export function Dashboard() {
         dy={12}
         textAnchor="middle"
         fontSize={12}
-        fill={m === focusMonth ? colors.tooltipText : colors.axis}
-        fontWeight={m === focusMonth ? 700 : 400}
+        fill={m === selectedMonth ? colors.tooltipText : colors.axis}
+        fontWeight={m === selectedMonth ? 700 : 400}
         className="cursor-pointer"
-        onClick={() => m && toggleMonth(m)}
+        onClick={() => m && selectMonth(m, true)}
       >
         {props.payload.value}
       </text>
@@ -211,40 +222,16 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <StepperNav
-            label={
-              focusMonth ? (
-                <>
-                  {year} <span className="text-[var(--color-muted-foreground)]">· {MONTH_SHORT[refIdx]}</span>
-                </>
-              ) : (
-                String(year)
-              )
-            }
-            onPrev={() => setYear(year - 1)}
-            onNext={() => setYear(year + 1)}
-            prevLabel="Previous year"
-            nextLabel="Next year"
-            picker={{ mode: "month", value: refMonth, onSelect: selectMonth }}
-            onToday={focusMonth !== thisMonth ? () => selectMonth(thisMonth) : undefined}
-            todayLabel="This month"
-          />
-          {focusMonth && (
-            <Button variant="secondary" size="sm" className="h-8 px-3" onClick={clearMonth}>
-              <X /> Whole year
-            </Button>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button asChild size="sm">
-            <Link to={`/month/${monthSlug(refMonth)}`}>
-              <PencilLine /> Enter {MONTH_SHORT[refIdx]}
-            </Link>
-          </Button>
-        </div>
-      </div>
+      <StepperNav
+        label={String(year)}
+        onPrev={() => setYear(year - 1)}
+        onNext={() => setYear(year + 1)}
+        prevLabel="Previous year"
+        nextLabel="Next year"
+        picker={{ mode: "year", value: year, onSelect: setYear }}
+        onToday={year !== thisYear ? () => setYear(thisYear) : undefined}
+        todayLabel="This year"
+      />
 
       {error && <FormError>{error}</FormError>}
 
@@ -252,101 +239,33 @@ export function Dashboard() {
         <p className="text-[var(--color-muted-foreground)]">Loading…</p>
       ) : (
         <>
-          <section className="space-y-3">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-muted-foreground)]">
-              <Link
-                to={periodLink}
-                className="inline-flex items-center gap-1 hover:text-[var(--color-foreground)] hover:underline"
-              >
-                {focusMonth ? formatMonth(focusMonth) : `${year}${year === thisYear ? " so far" : ""} (Jan–${MONTH_SHORT[lastShownIdx]})`}{" "}
-                <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-              </Link>
-            </h2>
+          {/* ---------- The year ---------- */}
+          <section className="space-y-6">
+            <SectionHeading
+              eyebrow="Year"
+              title={year === thisYear ? `${year} so far` : String(year)}
+              subtitle={`${yearLabel}${lastYearSummary ? `, compared with the same months in ${year - 1}` : ""}`}
+            />
             <SummaryTiles
-              current={current}
-              previous={previous}
-              compareLabel={focusMonth ? "vs last month" : `vs same period ${year - 1}`}
+              current={yearSummary}
+              previous={lastYearSummary}
+              compareLabel={`vs same period ${year - 1}`}
               colors={colors}
             />
-            {focusMonth && summaries[refIdx].entered < activeItemCount && summaries[refIdx].entered > 0 && (
-              <p className="text-xs text-[var(--color-muted-foreground)]">
-                {summaries[refIdx].entered} of {activeItemCount} line items have something this month.{" "}
-                <Link className="underline" to={periodLink}>
-                  Finish entering
-                </Link>
-              </p>
-            )}
-          </section>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Income vs spending by month</CardTitle>
-              <CardDescription>"Left over" is income minus spending and savings. {focusMonth ? "Click it again to see the whole year." : "Click a month to focus it."}</CardDescription>
-            </CardHeader>
-            <CardContent className="h-80 px-2 sm:px-6">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart
-                  data={monthlyData}
-                  margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
-                  barGap={2}
-                  onClick={onChartClick}
-                  className="cursor-pointer"
-                >
-                  <CartesianGrid vertical={false} stroke={colors.grid} />
-                  <XAxis dataKey="label" tick={monthTick} axisLine={false} tickLine={false} />
-                  <YAxis
-                    tickFormatter={formatMoneyCompact}
-                    tick={{ fill: colors.axis, fontSize: 12 }}
-                    axisLine={false}
-                    tickLine={false}
-                    width={48}
-                  />
-                  <Tooltip content={<MoneyTooltip colors={colors} />} cursor={{ fill: colors.grid, opacity: 0.5 }} />
-                  <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" iconSize={10} formatter={legendText(colors)} />
-                  <Bar isAnimationActive={false} dataKey="Income" fill={colors.income} radius={[6, 6, 0, 0]} maxBarSize={22}>
-                    {monthCells}
-                  </Bar>
-                  <Bar isAnimationActive={false} dataKey="Spending" fill={colors.spending} radius={[6, 6, 0, 0]} maxBarSize={22}>
-                    {monthCells}
-                  </Bar>
-                  <Bar isAnimationActive={false} dataKey="Saved" fill={colors.savings} radius={[6, 6, 0, 0]} maxBarSize={22}>
-                    {monthCells}
-                  </Bar>
-                  <Line
-                    isAnimationActive={false}
-                    dataKey="Left over"
-                    stroke={colors.neutral}
-                    strokeWidth={2}
-                    dot={(p: { cx?: number; cy?: number; index: number }) => (
-                      <circle
-                        key={p.index}
-                        cx={p.cx}
-                        cy={p.cy}
-                        r={shownMonths[p.index] === focusMonth ? 5 : 4}
-                        fill={colors.neutral}
-                        fillOpacity={dim(shownMonths[p.index])}
-                        stroke={colors.surface}
-                        strokeWidth={2}
-                      />
-                    )}
-                    activeDot={{ r: 5 }}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-6 lg:grid-cols-2">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-lg">Spending by category</CardTitle>
-                <CardDescription>Monthly spending, stacked by category (excludes savings). {focusMonth ? "Click it again to see the whole year." : "Click a month to focus it."}</CardDescription>
+                <CardTitle className="text-lg">Income vs spending by month</CardTitle>
+                <CardDescription>
+                  "Left over" is income minus spending and savings. Click a month to see it below.
+                </CardDescription>
               </CardHeader>
               <CardContent className="h-80 px-2 sm:px-6">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={stackedData}
+                  <ComposedChart
+                    data={monthlyData}
                     margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                    barGap={2}
                     onClick={onChartClick}
                     className="cursor-pointer"
                   >
@@ -359,149 +278,244 @@ export function Dashboard() {
                       tickLine={false}
                       width={48}
                     />
-                    <Tooltip content={<MoneyTooltip colors={colors} showTotal />} cursor={{ fill: colors.grid, opacity: 0.5 }} />
+                    <Tooltip content={<MoneyTooltip colors={colors} />} cursor={{ fill: colors.grid, opacity: 0.5 }} />
                     <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" iconSize={10} formatter={legendText(colors)} />
-                    {orderedSeries.map((c, i) => (
-                      <Bar
-                        isAnimationActive={false}
-                        key={c.id}
-                        dataKey={c.name}
-                        stackId="s"
-                        fill={colors.categorical[i]}
-                        stroke={colors.surface}
-                        strokeWidth={1}
-                        maxBarSize={32}
-                      >
-                        {monthCells}
-                      </Bar>
-                    ))}
-                    {hasOther && (
-                      <Bar isAnimationActive={false} dataKey="Other" stackId="s" fill={colors.neutral} stroke={colors.surface} strokeWidth={1} maxBarSize={32}>
-                        {monthCells}
-                      </Bar>
-                    )}
-                  </BarChart>
+                    <Bar isAnimationActive={false} dataKey="Income" fill={colors.income} radius={[6, 6, 0, 0]} maxBarSize={22}>
+                      {monthCells}
+                    </Bar>
+                    <Bar isAnimationActive={false} dataKey="Spending" fill={colors.spending} radius={[6, 6, 0, 0]} maxBarSize={22}>
+                      {monthCells}
+                    </Bar>
+                    <Bar isAnimationActive={false} dataKey="Saved" fill={colors.savings} radius={[6, 6, 0, 0]} maxBarSize={22}>
+                      {monthCells}
+                    </Bar>
+                    <Line
+                      isAnimationActive={false}
+                      dataKey="Left over"
+                      stroke={colors.neutral}
+                      strokeWidth={2}
+                      dot={(p: { cx?: number; cy?: number; index: number }) => (
+                        <circle
+                          key={p.index}
+                          cx={p.cx}
+                          cy={p.cy}
+                          r={shownMonths[p.index] === selectedMonth ? 5 : 4}
+                          fill={colors.neutral}
+                          fillOpacity={dim(shownMonths[p.index])}
+                          stroke={colors.surface}
+                          strokeWidth={2}
+                        />
+                      )}
+                      activeDot={{ r: 5 }}
+                    />
+                  </ComposedChart>
                 </ResponsiveContainer>
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 pb-2">
-                <div className="space-y-1.5">
-                  <CardTitle className="text-lg">Where the money went</CardTitle>
-                  <CardDescription>{periodLabel}</CardDescription>
-                </div>
-              </CardHeader>
-              <CardContent className="px-2 sm:px-6" style={{ height: Math.max(160, breakdown.length * 34 + 24) }}>
-                {breakdown.length === 0 ? (
-                  <p className="p-4 text-sm text-[var(--color-muted-foreground)]">No spending entered yet.</p>
-                ) : (
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg">Spending by category</CardTitle>
+                  <CardDescription>Monthly spending, stacked by category (excludes savings). Click a month to see it below.</CardDescription>
+                </CardHeader>
+                <CardContent className="h-80 px-2 sm:px-6">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={breakdown} layout="vertical" margin={{ top: 0, right: 64, left: 0, bottom: 0 }}>
-                      <XAxis type="number" hide />
+                    <BarChart
+                      data={stackedData}
+                      margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                      onClick={onChartClick}
+                      className="cursor-pointer"
+                    >
+                      <CartesianGrid vertical={false} stroke={colors.grid} />
+                      <XAxis dataKey="label" tick={monthTick} axisLine={false} tickLine={false} />
                       <YAxis
-                        type="category"
-                        dataKey="name"
-                        width={120}
+                        tickFormatter={formatMoneyCompact}
                         tick={{ fill: colors.axis, fontSize: 12 }}
                         axisLine={false}
                         tickLine={false}
+                        width={48}
                       />
-                      <Tooltip content={<MoneyTooltip colors={colors} />} cursor={{ fill: colors.grid, opacity: 0.5 }} />
-                      <Bar isAnimationActive={false} dataKey="total" name="Spent" fill={colors.spending} radius={[0, 6, 6, 0]} maxBarSize={20}>
-                        <LabelList
-                          dataKey="total"
-                          position="right"
-                          formatter={(v: number) => formatMoney(v)}
-                          style={{ fill: colors.tooltipText, fontSize: 12 }}
-                        />
-                      </Bar>
+                      <Tooltip content={<MoneyTooltip colors={colors} showTotal />} cursor={{ fill: colors.grid, opacity: 0.5 }} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" iconSize={10} formatter={legendText(colors)} />
+                      {orderedSeries.map((c, i) => (
+                        <Bar
+                          isAnimationActive={false}
+                          key={c.id}
+                          dataKey={c.name}
+                          stackId="s"
+                          fill={colors.categorical[i]}
+                          stroke={colors.surface}
+                          strokeWidth={1}
+                          maxBarSize={32}
+                        >
+                          {monthCells}
+                        </Bar>
+                      ))}
+                      {hasOther && (
+                        <Bar isAnimationActive={false} dataKey="Other" stackId="s" fill={colors.neutral} stroke={colors.surface} strokeWidth={1} maxBarSize={32}>
+                          {monthCells}
+                        </Bar>
+                      )}
                     </BarChart>
                   </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+                </CardContent>
+              </Card>
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card>
-              <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 pb-2">
-                <div className="space-y-1.5">
+              <BreakdownCard title="Where the money went" description={yearLabel} rows={yearBreakdown} colors={colors} />
+            </div>
+          </section>
+
+          {/* ---------- The selected month ---------- */}
+          <section ref={monthSectionRef} className="scroll-mt-20 space-y-6 border-t border-[var(--color-border)] pt-8">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div className="space-y-1">
+                <p className={eyebrowClass}>Month</p>
+                <StepperNav
+                  size="md"
+                  label={formatMonth(selectedMonth)}
+                  onPrev={() => selectMonth(addMonths(selectedMonth, -1))}
+                  onNext={() => selectMonth(addMonths(selectedMonth, 1))}
+                  prevLabel="Previous month"
+                  nextLabel="Next month"
+                  picker={{ mode: "month", value: selectedMonth, onSelect: (m) => selectMonth(m) }}
+                  onToday={selectedMonth !== thisMonth ? () => selectMonth(thisMonth) : undefined}
+                  todayLabel="This month"
+                />
+              </div>
+              <Button asChild size="sm">
+                <Link to={monthLink}>
+                  <PencilLine /> Open {MONTH_SHORT[selectedIdx]}
+                </Link>
+              </Button>
+            </div>
+            <SummaryTiles
+              current={monthSummary}
+              previous={prevMonthSummary}
+              compareLabel={`vs ${formatMonth(prevMonth, "short")}`}
+              colors={colors}
+            />
+            {monthSummary.entered < activeItemCount && monthSummary.entered > 0 && (
+              <p className="-mt-3 text-xs text-[var(--color-muted-foreground)]">
+                {monthSummary.entered} of {activeItemCount} line items have something this month.{" "}
+                <Link className="underline" to={monthLink}>
+                  Finish entering
+                </Link>
+              </p>
+            )}
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <BreakdownCard
+                title="Where the money went"
+                description={formatMonth(selectedMonth)}
+                rows={monthBreakdown}
+                colors={colors}
+              />
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <ShoppingBag className="h-4 w-4" aria-hidden /> Biggest purchases
+                  </CardTitle>
+                  <CardDescription>
+                    {purchases.length
+                      ? `Largest card charges and manual entries in ${formatMonth(selectedMonth)}.`
+                      : `No purchases in ${formatMonth(selectedMonth)} yet.`}
+                  </CardDescription>
+                </CardHeader>
+                {purchases.length > 0 && (
+                  <ul className="divide-y divide-[var(--color-border)] pb-2">
+                    {purchases.map((p) => {
+                      const Icon = p.oneOff ? PenLine : CreditCard;
+                      const content = (
+                        <>
+                          <Icon className="h-4 w-4 shrink-0 text-[var(--color-muted-foreground)]" aria-hidden />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-medium">{p.name}</span>
+                            <span className="block truncate text-xs text-[var(--color-muted-foreground)]">{p.detail}</span>
+                          </span>
+                          <span className="font-medium tabular-nums">{formatMoney(p.amount, true)}</span>
+                        </>
+                      );
+                      return (
+                        <li key={p.id}>
+                          {p.oneOff ? (
+                            <button type="button" className={purchaseRowClass} onClick={() => setEditingOneOff(p.oneOff)}>
+                              {content}
+                            </button>
+                          ) : (
+                            <Link to={monthLink} className={purchaseRowClass}>
+                              {content}
+                            </Link>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </Card>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Card>
+                <CardHeader className="pb-2">
                   <CardTitle className="text-lg">Budget vs actual</CardTitle>
                   <CardDescription>
                     {budgetRows.length
-                      ? `${periodLabel}: ${budgetRemaining >= 0 ? `${formatMoney(budgetRemaining)} left` : `${formatMoney(-budgetRemaining)} over`} across budgeted categories`
+                      ? `${formatMonth(selectedMonth)}: ${budgetRemaining >= 0 ? `${formatMoney(budgetRemaining)} left` : `${formatMoney(-budgetRemaining)} over`} across budgeted categories`
                       : "Set monthly budgets on categories in Settings."}
                   </CardDescription>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {budgetRows.length === 0 ? (
-                  <Button asChild variant="outline" size="sm">
-                    <Link to="/settings">Set budgets</Link>
-                  </Button>
-                ) : (
-                  budgetRows.map((r) => (
-                    <div key={r.cat.id}>
-                      <Link to={periodLink} className="mb-1 block text-sm font-medium hover:underline">
-                        {r.cat.name}
-                      </Link>
-                      <BudgetBar spent={r.spent} budget={r.budget} />
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {budgetRows.length === 0 ? (
+                    <Button asChild variant="outline" size="sm">
+                      <Link to="/settings">Set budgets</Link>
+                    </Button>
+                  ) : (
+                    budgetRows.map((r) => (
+                      <div key={r.cat.id}>
+                        <Link to={monthLink} className="mb-1 block text-sm font-medium hover:underline">
+                          {r.cat.name}
+                        </Link>
+                        <BudgetBar spent={r.spent} budget={r.budget} />
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
 
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <ShoppingBag className="h-4 w-4" aria-hidden /> Largest one-time entries
-                </CardTitle>
-                <CardDescription>
-                  {bigPurchases.length
-                    ? `Biggest manual spending entries in ${year} that don't repeat monthly.`
-                    : `No one-time manual entries in ${year} yet.`}
-                </CardDescription>
-              </CardHeader>
-              {bigPurchases.length > 0 && (
-                <OneOffList oneOffs={bigPurchases} categories={categories} items={items} showMonth onEdit={setEditingOneOff} />
-              )}
-            </Card>
-          </div>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">
-                Biggest changes: {formatMonth(refMonth, "short")} vs {formatMonth(prevMonth, "short")}
-              </CardTitle>
-              <CardDescription>Spending line items that moved the most this month.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {changes.length === 0 ? (
-                <p className="text-sm text-[var(--color-muted-foreground)]">No changes to show.</p>
-              ) : (
-                <ul className="divide-y divide-[var(--color-border)]">
-                  {changes.map((c) => (
-                    <li key={c.item.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                      <Link to={`/month/${monthSlug(refMonth)}`} className="truncate hover:underline">
-                        {c.item.name}
-                      </Link>
-                      <span className="flex items-center gap-3 tabular-nums">
-                        <span className="text-[var(--color-muted-foreground)]">
-                          {formatMoney(c.before)} → {formatMoney(c.now)}
-                        </span>
-                        <span className="w-20 text-right font-medium">
-                          {c.delta > 0 ? "+" : "−"}
-                          {formatMoney(Math.abs(c.delta))}
-                        </span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg">Biggest changes vs {formatMonth(prevMonth, "short")}</CardTitle>
+                  <CardDescription>Spending line items that moved the most in {formatMonth(selectedMonth)}.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {changes.length === 0 ? (
+                    <p className="text-sm text-[var(--color-muted-foreground)]">No changes to show.</p>
+                  ) : (
+                    <ul className="divide-y divide-[var(--color-border)]">
+                      {changes.map((c) => (
+                        <li key={c.item.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                          <Link to={monthLink} className="truncate hover:underline">
+                            {c.item.name}
+                          </Link>
+                          <span className="flex items-center gap-3 tabular-nums">
+                            <span className="text-[var(--color-muted-foreground)]">
+                              {formatMoney(c.before)} → {formatMoney(c.now)}
+                            </span>
+                            <span className="w-20 text-right font-medium">
+                              {c.delta > 0 ? "+" : "−"}
+                              {formatMoney(Math.abs(c.delta))}
+                            </span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </section>
         </>
       )}
       {editingOneOff && (
@@ -518,6 +532,71 @@ export function Dashboard() {
         />
       )}
     </div>
+  );
+}
+
+type Purchase = { id: string; name: string; detail: string; amount: number; oneOff: OneOff | null };
+
+const eyebrowClass = "text-xs font-bold uppercase tracking-wider text-[var(--color-primary)]";
+const purchaseRowClass = "flex w-full items-center gap-3 px-6 py-2 text-left text-sm hover:bg-[var(--color-accent)]";
+
+function SectionHeading({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle: string }) {
+  return (
+    <div className="space-y-1">
+      <p className={eyebrowClass}>{eyebrow}</p>
+      <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h2>
+      <p className="text-sm text-[var(--color-muted-foreground)]">{subtitle}</p>
+    </div>
+  );
+}
+
+/** Horizontal bars of spending per category for a period. */
+function BreakdownCard({
+  title,
+  description,
+  rows,
+  colors,
+}: {
+  title: string;
+  description: string;
+  rows: { name: string; total: number }[];
+  colors: ChartColors;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg">{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="px-2 sm:px-6" style={{ height: Math.max(160, rows.length * 34 + 24) }}>
+        {rows.length === 0 ? (
+          <p className="p-4 text-sm text-[var(--color-muted-foreground)]">No spending entered yet.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={rows} layout="vertical" margin={{ top: 0, right: 64, left: 0, bottom: 0 }}>
+              <XAxis type="number" hide />
+              <YAxis
+                type="category"
+                dataKey="name"
+                width={120}
+                tick={{ fill: colors.axis, fontSize: 12 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip content={<MoneyTooltip colors={colors} />} cursor={{ fill: colors.grid, opacity: 0.5 }} />
+              <Bar isAnimationActive={false} dataKey="total" name="Spent" fill={colors.spending} radius={[0, 6, 6, 0]} maxBarSize={20}>
+                <LabelList
+                  dataKey="total"
+                  position="right"
+                  formatter={(v: number) => formatMoney(v)}
+                  style={{ fill: colors.tooltipText, fontSize: 12 }}
+                />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
