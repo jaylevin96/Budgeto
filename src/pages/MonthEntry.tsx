@@ -473,6 +473,7 @@ export function MonthEntry() {
           categories={categories}
           items={items}
           recurring={recurring}
+          ledger={ledger}
           startRecurring={editingOneOff.startRecurring}
           onClose={() => setEditingOneOff(null)}
           onRecurringChanged={() => {

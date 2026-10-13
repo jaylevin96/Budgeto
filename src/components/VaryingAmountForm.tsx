@@ -12,6 +12,7 @@ import {
   parseMonthKey,
   type OneOff,
 } from "@/lib/budget";
+import { amountWarning } from "@/lib/checks";
 import { enterAmount, removeRecurring, setOccurrenceAmount, type RecurringEntry } from "@/lib/recurring";
 import { cn } from "@/lib/utils";
 
@@ -48,6 +49,17 @@ export function VaryingAmountForm({
   const parsed = parseAmount(text);
   const unchanged = entry !== undefined && parsed === entry.amount;
   const missing = !entry && month <= currentMonthKey();
+  const known = history.flatMap((h) => (h.amount === undefined ? [] : [h.amount]));
+  const warning =
+    known.length >= 2 && parsed !== null && !Number.isNaN(parsed) && !unchanged
+      ? amountWarning(
+          recurring.name,
+          parsed,
+          known.reduce((a, b) => a + b, 0) / known.length,
+          true,
+          recurring.every_months === 1 ? "a month" : "each time"
+        )
+      : null;
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -124,6 +136,11 @@ export function VaryingAmountForm({
           {busy ? "Saving…" : `Save for ${mon(month)}`}
         </Button>
       </form>
+      {warning && (
+        <p role="status" className="text-sm text-[var(--color-warning)]">
+          {warning}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         {last && !(entry && entry.amount === last.amount) && (
           <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => save(last.amount!)}>

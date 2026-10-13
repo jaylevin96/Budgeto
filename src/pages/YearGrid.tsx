@@ -358,6 +358,7 @@ export function YearGrid() {
           categories={categories}
           items={items}
           recurring={recurring}
+          ledger={ledger}
           onClose={() => setEditingOneOff(null)}
           onRecurringChanged={() => {
             setEditingOneOff(null);

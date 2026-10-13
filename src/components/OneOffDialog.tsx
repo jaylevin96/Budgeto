@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Repeat } from "lucide-react";
+import { Repeat, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FormError } from "@/components/ui/form-message";
@@ -16,9 +16,11 @@ import {
   parseMonthKey,
   saveOneOff,
   type Category,
+  type Ledger,
   type LineItem,
   type OneOff,
 } from "@/lib/budget";
+import { entryWarnings } from "@/lib/checks";
 import {
   CADENCES,
   cadenceLabel,
@@ -43,6 +45,7 @@ export function OneOffDialog({
   categories,
   items,
   recurring = [],
+  ledger,
   startRecurring = false,
   onClose,
   onSaved,
@@ -54,6 +57,8 @@ export function OneOffDialog({
   items: LineItem[];
   /** All recurring entries, to find the one this entry belongs to */
   recurring?: RecurringEntry[];
+  /** Loaded entries, to warn about unusual amounts and duplicates (nothing is checked without it) */
+  ledger?: Ledger;
   /** Pre-check "Repeat every month" (e.g. from "+ Add recurring entry") */
   startRecurring?: boolean;
   onClose: () => void;
@@ -92,6 +97,12 @@ export function OneOffDialog({
         ? monthKey(typedYear, monthIdx)
         : monthKey(initialMonth.year, monthIdx);
   const monthLabel = formatMonth(month, "short");
+  const typedAmount = parseAmount(amountText);
+  // Only the month being saved is checked; a recurring entry's later months aren't known yet
+  const warnings =
+    ledger && categoryId && typedAmount !== null && !Number.isNaN(typedAmount)
+      ? entryWarnings(ledger, { month, category_id: categoryId, line_item_id: lineItemId || null }, typedAmount, oneOff?.id)
+      : [];
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -261,6 +272,16 @@ export function OneOffDialog({
                 />
               </div>
             </div>
+            {warnings.length > 0 && (
+              <div role="status" className="space-y-1 rounded-md bg-[var(--color-warning)]/10 px-3 py-2 text-sm">
+                {warnings.map((w) => (
+                  <p key={w} className="flex gap-2">
+                    <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-warning)]" aria-hidden />
+                    {w}
+                  </p>
+                ))}
+              </div>
+            )}
             {!series && (
               <div className="grid grid-cols-[1fr_6rem] gap-4">
                 <div className="space-y-2">
