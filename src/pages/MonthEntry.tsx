@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, CreditCard, Plus, Repeat, Settings2 } from "lucide-react";
+import { AlertTriangle, CreditCard, Plus, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
@@ -10,6 +10,7 @@ import { CardTransactionsDialog } from "@/components/CardTransactions";
 import { EmptyBudget } from "@/components/EmptyBudget";
 import { OneOffDialog } from "@/components/OneOffDialog";
 import { CardChargesRow, OneOffList } from "@/components/OneOffList";
+import { RecurringPanel } from "@/components/RecurringPanel";
 import { StepperNav } from "@/components/StepperNav";
 import { SummaryTiles } from "@/components/SummaryTiles";
 import { useBudget } from "@/hooks/useBudget";
@@ -20,7 +21,6 @@ import {
   currentMonthKey,
   formatMoney,
   formatMonth,
-  insertOneOffs,
   itemCard,
   itemEntered,
   itemMonthTotal,
@@ -28,7 +28,6 @@ import {
   KIND_LABEL,
   monthKeyFromSlug,
   monthSlug,
-  repeatingToCopy,
   summarizeMonth,
   sumMoney,
   totalForCategoryMonth,
@@ -40,14 +39,14 @@ import {
 import type { Transaction } from "@/lib/transactions";
 import { cn } from "@/lib/utils";
 
-type EditingOneOff = { oneOff: OneOff | null; category_id?: string | null } | null;
+type EditingOneOff = { oneOff: OneOff | null; category_id?: string | null; startRecurring?: boolean } | null;
 
 export function MonthEntry() {
   const params = useParams();
   const navigate = useNavigate();
   const month = monthKeyFromSlug(params.month) ?? currentMonthKey();
 
-  // Load last month too, for "vs last month" and repeating entries
+  // Load last month too, for "vs last month"
   const {
     categories,
     items,
@@ -58,13 +57,12 @@ export function MonthEntry() {
     error,
     reload,
     applyOneOff,
-    applyOneOffs,
+    recurring,
+    refresh,
     applyTransactions,
     applyCreated,
   } = useBudget(addMonths(month, -1), addMonths(month, 1));
   const [onlyMissing, setOnlyMissing] = useState(false);
-  const [copying, setCopying] = useState(false);
-  const [copyError, setCopyError] = useState<string | null>(null);
   const [editingOneOff, setEditingOneOff] = useState<EditingOneOff>(null);
   // Which card charges the dialog shows (a snapshot, so a reassigned charge stays in view)
   const [cardDialog, setCardDialog] = useState<{ title: string; description: string; ids: Set<string> } | null>(null);
@@ -74,31 +72,6 @@ export function MonthEntry() {
   const summary = summarizeMonth(ledger, month);
   const prevSummary = summarizeMonth(ledger, addMonths(month, -1));
   const needsCategory = ledger.uncategorized.get(month) ?? [];
-  const toCopy = repeatingToCopy(ledger, month);
-
-  async function copyRepeating() {
-    setCopying(true);
-    setCopyError(null);
-    try {
-      applyOneOffs(
-        await insertOneOffs(
-          toCopy.map((o) => ({
-            name: o.name,
-            amount: o.amount,
-            month,
-            category_id: o.category_id,
-            line_item_id: o.line_item_id,
-            note: o.note,
-            repeats: true,
-          }))
-        )
-      );
-    } catch (err) {
-      setCopyError(err instanceof Error ? err.message : "Could not save");
-    } finally {
-      setCopying(false);
-    }
-  }
 
   const showCard = (title: string, description: string, card: Transaction[]) =>
     setCardDialog({ title, description, ids: new Set(card.map((t) => t.id)) });
@@ -145,7 +118,9 @@ export function MonthEntry() {
             Totals come from <span className="font-medium text-[var(--color-foreground)]">card charges</span> (Import
             Amex) and <span className="font-medium text-[var(--color-foreground)]">manual entries</span>: named amounts
             you add to a category, like “Rent $2,000” or “Hotel $500”. Use{" "}
-            <span className="font-medium text-[var(--color-foreground)]">+ Add manual entry</span> in any category.
+            <span className="font-medium text-[var(--color-foreground)]">+ Add manual entry</span> in any category;
+            things that repeat every month go under{" "}
+            <span className="font-medium text-[var(--color-foreground)]">Recurring</span> and fill in by themselves.
           </p>
 
           <Card>
@@ -175,17 +150,17 @@ export function MonthEntry() {
                 />
                 Only show empty
               </label>
-              {toCopy.length > 0 && (
-                <Button size="sm" onClick={copyRepeating} disabled={copying}>
-                  <Repeat />
-                  {copying
-                    ? "Saving…"
-                    : `Repeat ${toCopy.length} from ${formatMonth(addMonths(month, -1), "short")} (${formatMoney(sumMoney(toCopy.map((o) => o.amount)))})`}
-                </Button>
-              )}
-              {copyError && <FormError>{copyError}</FormError>}
             </CardContent>
           </Card>
+
+          <RecurringPanel
+            month={month}
+            recurring={recurring}
+            categories={categories}
+            items={items}
+            onAdd={() => setEditingOneOff({ oneOff: null, startRecurring: true })}
+            onChanged={refresh}
+          />
 
           <CardActivity
             month={month}
@@ -268,7 +243,13 @@ export function MonthEntry() {
           defaults={{ month, category_id: editingOneOff.category_id }}
           categories={categories}
           items={items}
+          recurring={recurring}
+          startRecurring={editingOneOff.startRecurring}
           onClose={() => setEditingOneOff(null)}
+          onRecurringChanged={() => {
+            setEditingOneOff(null);
+            refresh();
+          }}
           onSaved={(id, saved) => {
             setEditingOneOff(null);
             applyOneOff(id, saved);
