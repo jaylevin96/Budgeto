@@ -34,7 +34,7 @@ Run migrations from the SQL editor rather than `supabase db push`. The project's
 
 ### 2. Login
 
-Auth (`auth.users`) is shared across all three apps, so the shared household login can be an account that already exists. The app has no sign-up screen. To create a new account, use **Authentication → Users → Add user** in the Supabase dashboard. Data is scoped per account with row-level security.
+Auth (`auth.users`) is shared across all three apps, so the shared household login can be an account that already exists. You can also create one with **Need an account? Sign up** on the login screen (Supabase emails a confirmation link), or under **Authentication → Users → Add user** in the Supabase dashboard. Data is scoped per account with row-level security, so other accounts never see your budget.
 
 ### 3. Run locally
 

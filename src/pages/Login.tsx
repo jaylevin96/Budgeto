@@ -10,6 +10,7 @@ import { Wallet } from "lucide-react";
 
 export function Login() {
   const location = useLocation();
+  const [isSignUp, setIsSignUp] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -34,6 +35,12 @@ export function Login() {
         });
         if (resetError) throw resetError;
         setSuccessMessage("Check your email for a link to reset your password.");
+      } else if (isSignUp) {
+        const { error: signUpError } = await supabase.auth.signUp({ email, password });
+        if (signUpError) throw signUpError;
+        setSuccessMessage(
+          "Check your email for a confirmation link to activate your account."
+        );
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
         if (signInError) throw signInError;
@@ -56,7 +63,9 @@ export function Login() {
           <CardDescription>
             {isForgotPassword
               ? "Enter your email to receive a reset link"
-              : "Sign in to your household budget"}
+              : isSignUp
+                ? "Create an account"
+                : "Sign in to your household budget"}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -82,7 +91,8 @@ export function Login() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  autoComplete="current-password"
+                  minLength={isSignUp ? 6 : undefined}
+                  autoComplete={isSignUp ? "new-password" : "current-password"}
                 />
               </div>
             )}
@@ -107,22 +117,27 @@ export function Login() {
                 ? "Please wait…"
                 : isForgotPassword
                   ? "Send reset link"
-                  : "Sign in"}
+                  : isSignUp
+                    ? "Sign up"
+                    : "Sign in"}
             </Button>
-            {isForgotPassword && (
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full"
-                onClick={() => {
-                  setIsForgotPassword(false);
-                  setError(null);
-                  setSuccessMessage(null);
-                }}
-              >
-                Back to sign in
-              </Button>
-            )}
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full"
+              onClick={() => {
+                setIsSignUp((v) => !v);
+                setIsForgotPassword(false);
+                setError(null);
+                setSuccessMessage(null);
+              }}
+            >
+              {isForgotPassword
+                ? "Back to sign in"
+                : isSignUp
+                  ? "Already have an account? Sign in"
+                  : "Need an account? Sign up"}
+            </Button>
           </form>
         </CardContent>
       </Card>
