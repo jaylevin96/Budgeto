@@ -10,9 +10,8 @@ import { CardTransactionsDialog } from "@/components/CardTransactions";
 import { EmptyBudget } from "@/components/EmptyBudget";
 import { OneOffDialog } from "@/components/OneOffDialog";
 import { CardChargesRow, OneOffList } from "@/components/OneOffList";
-import { RecurringPanel } from "@/components/RecurringPanel";
+import { RecurringDialog, RecurringPanel } from "@/components/RecurringPanel";
 import { CategoryDialog, ItemDialog } from "@/components/StructureDialogs";
-import { VaryingAmountsCard } from "@/components/VaryingAmountsCard";
 import { StepperNav } from "@/components/StepperNav";
 import { SummaryTiles } from "@/components/SummaryTiles";
 import { useBudget } from "@/hooks/useBudget";
@@ -37,6 +36,7 @@ import {
   type LineItem,
   type OneOff,
 } from "@/lib/budget";
+import type { RecurringEntry } from "@/lib/recurring";
 import type { Transaction } from "@/lib/transactions";
 import { cn } from "@/lib/utils";
 
@@ -77,6 +77,8 @@ export function MonthEntry() {
   } = useBudget(addMonths(month, -3), addMonths(month, 1));
   const [editingOneOff, setEditingOneOff] = useState<EditingOneOff>(null);
   const [creating, setCreating] = useState<Creating>(null);
+  // A recurring entry whose amount changes each month opens in its own modal (this month's amount)
+  const [managing, setManaging] = useState<RecurringEntry | null>(null);
   // Which card charges the dialog shows (a snapshot, so a reassigned charge stays in view)
   const [cardDialog, setCardDialog] = useState<{ title: string; description: string; ids: Set<string> } | null>(null);
   // Categories folded down to their header; remembered across months and visits
@@ -103,6 +105,12 @@ export function MonthEntry() {
   const summary = summarizeMonth(ledger, month);
   const prevSummary = summarizeMonth(ledger, addMonths(month, -1));
   const needsCategory = ledger.uncategorized.get(month) ?? [];
+
+  const editEntry = (o: OneOff) => {
+    const series = o.recurring_id ? recurring.find((r) => r.id === o.recurring_id) : undefined;
+    if (series?.amount_varies) setManaging(series);
+    else setEditingOneOff({ oneOff: o });
+  };
 
   const showCard = (title: string, description: string, card: Transaction[]) =>
     setCardDialog({ title, description, ids: new Set(card.map((t) => t.id)) });
@@ -145,15 +153,6 @@ export function MonthEntry() {
         <p className="text-[var(--color-muted-foreground)]">Loading…</p>
       ) : (
         <>
-          <VaryingAmountsCard
-            month={month}
-            recurring={recurring}
-            oneOffs={oneOffs}
-            categories={categories}
-            items={items}
-            onEntered={(saved) => applyOneOff(saved.id, saved)}
-            onSkipped={refresh}
-          />
 
           <SummaryTiles current={summary} previous={prevSummary} compareLabel="vs last month" />
 
@@ -171,7 +170,7 @@ export function MonthEntry() {
                 categories={categories}
                 items={items}
                 showTarget={false}
-                onEdit={(o) => setEditingOneOff({ oneOff: o })}
+                onEdit={editEntry}
               />
             </Card>
           )}
@@ -187,6 +186,7 @@ export function MonthEntry() {
                 items={items}
                 onAdd={() => setEditingOneOff({ oneOff: null, startRecurring: true })}
                 onChanged={refresh}
+                onAmountSaved={applyOneOff}
               />
 
               <CardActivity
@@ -226,7 +226,7 @@ export function MonthEntry() {
                   onToggle={() => toggleCategory(cat.id)}
                   onAdd={() => setEditingOneOff({ oneOff: null, category_id: cat.id })}
                   onAddItem={() => setCreating({ type: "item", categoryId: cat.id })}
-                  onEdit={(o) => setEditingOneOff({ oneOff: o })}
+                  onEdit={editEntry}
                   onShowCard={showCard}
                 />
               ))}
@@ -270,6 +270,25 @@ export function MonthEntry() {
           onSaved={() => {
             setCreating(null);
             refresh();
+          }}
+        />
+      )}
+
+      {managing && (
+        <RecurringDialog
+          entry={managing}
+          month={month}
+          oneOffs={oneOffs}
+          categories={categories}
+          items={items}
+          onClose={() => setManaging(null)}
+          onChanged={() => {
+            setManaging(null);
+            refresh();
+          }}
+          onAmountSaved={(id, saved) => {
+            setManaging(null);
+            applyOneOff(id, saved);
           }}
         />
       )}

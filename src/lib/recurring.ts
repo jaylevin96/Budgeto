@@ -242,3 +242,15 @@ export function needingAmount(recurring: RecurringEntry[], oneOffs: OneOff[], mo
     (r) => r.amount_varies && activeIn(r, month) && !oneOffs.some((o) => o.recurring_id === r.id && o.month === month)
   );
 }
+
+/** Change the amount entered for one month of a recurring entry. */
+export async function setOccurrenceAmount(id: string, amount: number): Promise<OneOff> {
+  const { data, error } = await supabase
+    .from("one_offs")
+    .update({ amount })
+    .eq("id", id)
+    .select("id, name, amount, month, category_id, line_item_id, note, recurring_id")
+    .single();
+  if (error) throw error;
+  return { ...(data as OneOff), amount: Number((data as OneOff).amount) };
+}
