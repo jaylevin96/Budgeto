@@ -108,7 +108,7 @@ export function OneOffDialog({
     const entryName = name.trim() || lineItemName;
     if (!entryName) return setError("Give it a name, e.g. Hotel");
     const amount = parseAmount(amountText);
-    if (amount === null || Number.isNaN(amount)) return setError("Enter an amount like 400 or 399.99");
+    if (amount === null || Number.isNaN(amount)) return setError("Enter an amount like 400 or 399.99 (0 is fine)");
     if (!Number.isInteger(typedYear) || typedYear < 2000 || typedYear > 2100) return setError("Enter a valid year");
     const fields: EntryFields = { name: entryName, amount, category_id: categoryId, line_item_id: lineItemId || null, note: note || null };
 
@@ -245,7 +245,9 @@ export function OneOffDialog({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="oo-amount">Amount</Label>
+                <Label htmlFor="oo-amount">
+                  {series?.amount_varies || (repeat && varies) ? `Amount for ${formatMonth(month, "short")}` : "Amount"}
+                </Label>
                 <Input
                   id="oo-amount"
                   inputMode="decimal"
