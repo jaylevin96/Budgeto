@@ -28,12 +28,12 @@ function colorsFor(theme: "light" | "dark"): ChartColors {
     income: c[0],
     spending: c[1],
     savings: c[2],
-    neutral: theme === "dark" ? "#c3c2b7" : "#52514e",
-    grid: theme === "dark" ? "#2e2e2c" : "#ebeae6",
-    axis: theme === "dark" ? "#a3a29b" : "#6b6a65",
-    surface: theme === "dark" ? "#262626" : "#ffffff",
-    tooltipBg: theme === "dark" ? "#1a1a19" : "#ffffff",
-    tooltipText: theme === "dark" ? "#f0efec" : "#0b0b0b",
+    neutral: theme === "dark" ? "#c4c9c0" : "#4b524c",
+    grid: theme === "dark" ? "#2a3430" : "#e8e7de",
+    axis: theme === "dark" ? "#a2aba4" : "#66706a",
+    surface: theme === "dark" ? "#1b2421" : "#fdfcf8",
+    tooltipBg: theme === "dark" ? "#141b18" : "#fdfcf8",
+    tooltipText: theme === "dark" ? "#f1efe7" : "#1b2722",
   };
 }
 

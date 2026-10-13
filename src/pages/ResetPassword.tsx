@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { FormError } from "@/components/ui/form-message";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Wallet } from "lucide-react";
+import { AuthShell } from "@/components/AuthShell";
+import { Card, CardContent } from "@/components/ui/card";
 
 export function ResetPassword() {
   const navigate = useNavigate();
@@ -72,16 +72,7 @@ export function ResetPassword() {
   }
 
   return (
-    <div className="flex min-h-svh items-center justify-center bg-[var(--color-background)] p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="space-y-1 text-center">
-          <div className="flex justify-center">
-            <Wallet className="h-10 w-10 text-[var(--color-primary)]" />
-          </div>
-          <CardTitle className="text-2xl">Budgeto</CardTitle>
-          <CardDescription>Set a new password</CardDescription>
-        </CardHeader>
-        <CardContent>
+    <AuthShell subtitle="Set a new password">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="password">New password</Label>
@@ -120,8 +111,6 @@ export function ResetPassword() {
               Back to sign in
             </Button>
           </form>
-        </CardContent>
-      </Card>
-    </div>
+    </AuthShell>
   );
 }

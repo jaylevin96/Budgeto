@@ -5,8 +5,7 @@ import { Button } from "@/components/ui/button";
 import { FormError, FormSuccess } from "@/components/ui/form-message";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Wallet } from "lucide-react";
+import { AuthShell } from "@/components/AuthShell";
 
 export function Login() {
   const location = useLocation();
@@ -53,22 +52,9 @@ export function Login() {
   }
 
   return (
-    <div className="flex min-h-svh items-center justify-center bg-[var(--color-background)] p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="space-y-1 text-center">
-          <div className="flex justify-center">
-            <Wallet className="h-10 w-10 text-[var(--color-primary)]" />
-          </div>
-          <CardTitle className="text-2xl">Budgeto</CardTitle>
-          <CardDescription>
-            {isForgotPassword
-              ? "Enter your email to receive a reset link"
-              : isSignUp
-                ? "Create an account"
-                : "Sign in to your household budget"}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+    <AuthShell
+      subtitle={isForgotPassword ? "Reset your password" : isSignUp ? "Create an account" : "Welcome back"}
+    >
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -139,8 +125,6 @@ export function Login() {
                   : "Need an account? Sign up"}
             </Button>
           </form>
-        </CardContent>
-      </Card>
-    </div>
+    </AuthShell>
   );
 }

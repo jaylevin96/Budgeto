@@ -16,14 +16,16 @@ export function StepperNav({
   nextLabel: string;
 }) {
   return (
-    <div className="flex items-center gap-1">
-      <Button variant="ghost" size="icon" onClick={onPrev} aria-label={prevLabel}>
-        <ChevronLeft />
-      </Button>
-      <h1 className="min-w-40 text-center text-xl font-semibold sm:text-2xl">{label}</h1>
-      <Button variant="ghost" size="icon" onClick={onNext} aria-label={nextLabel}>
-        <ChevronRight />
-      </Button>
+    <div className="flex items-center gap-3">
+      <h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">{label}</h1>
+      <div className="flex items-center gap-1">
+        <Button variant="outline" size="icon" className="h-8 w-8" onClick={onPrev} aria-label={prevLabel}>
+          <ChevronLeft />
+        </Button>
+        <Button variant="outline" size="icon" className="h-8 w-8" onClick={onNext} aria-label={nextLabel}>
+          <ChevronRight />
+        </Button>
+      </div>
     </div>
   );
 }
