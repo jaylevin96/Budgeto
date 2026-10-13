@@ -6,7 +6,6 @@ import { Login } from "@/pages/Login";
 import { ResetPassword } from "@/pages/ResetPassword";
 import { MonthEntry } from "@/pages/MonthEntry";
 import { YearGrid } from "@/pages/YearGrid";
-import { OneOffs } from "@/pages/OneOffs";
 import { Settings } from "@/pages/Settings";
 
 // Charts (recharts) and the spreadsheet parser (xlsx) are heavy; load them on demand
@@ -20,12 +19,6 @@ function FullPageLoading() {
       <p className="text-[var(--color-muted-foreground)]">Loading…</p>
     </div>
   );
-}
-
-/** Old links (e.g. /one-offs?year=2026) keep working after a rename. */
-function RedirectKeepingSearch({ to }: { to: string }) {
-  const { search } = useLocation();
-  return <Navigate to={`${to}${search}`} replace />;
 }
 
 function ProtectedRoute() {
@@ -67,8 +60,6 @@ export function AppRoutes() {
         <Route path="/month/:month" element={<MonthEntry />} />
         <Route path="/year" element={<YearGrid />} />
         <Route path="/year/:year" element={<YearGrid />} />
-        <Route path="/entries" element={<OneOffs />} />
-        <Route path="/one-offs" element={<RedirectKeepingSearch to="/entries" />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/settings/import" element={<Import />} />
         <Route path="/import/card" element={<CardImport />} />

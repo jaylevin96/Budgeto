@@ -57,7 +57,7 @@ const REASON_LABEL: Record<ReviewRow["reason"], string> = {
   "category rule": "Your rule",
   split: "Split with a friend",
   suggested: "Suggested",
-  "matches one-off": "Matches an entry",
+  "matches one-off": "Matches a manual entry",
   none: "",
 };
 
@@ -336,7 +336,7 @@ export function CardImport() {
                           + {formatMoney(m.unfiledTotal, true)} uncategorized ({m.unfiled})
                         </span>
                       )}
-                                            {m.covered > 0 && ` · ${formatMoney(m.covered, true)} already added as entries`}
+                                            {m.covered > 0 && ` · ${formatMoney(m.covered, true)} already added as manual entries`}
                     </p>
                   ))}
                   {clashes > 0 && (
@@ -421,7 +421,7 @@ export function CardImport() {
                         )}
                         {linkedOneOff && (
                           <p className="w-full text-right text-xs text-[var(--color-muted-foreground)]">
-                            Counted through the entry “{linkedOneOff.name}” ({formatMoney(linkedOneOff.amount, true)}),
+                            Counted through the manual entry “{linkedOneOff.name}” ({formatMoney(linkedOneOff.amount, true)}),
                             not again.
                           </p>
                         )}

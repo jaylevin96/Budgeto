@@ -169,7 +169,7 @@ export function YearGrid() {
             size="sm"
             onClick={() => setEditingOneOff({ oneOff: null, month: lastMonthWithData(summaries) ?? months[0] })}
           >
-            <Plus /> Entry
+            <Plus /> Manual entry
           </Button>
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || loading}>
             <Download /> {exporting ? "Exporting…" : "Export .xlsx"}
@@ -179,7 +179,7 @@ export function YearGrid() {
       {(error || exportError) && <FormError>{error ?? exportError}</FormError>}
       <p className="text-xs text-[var(--color-muted-foreground)]">
         Click a category to see its line items. Line-item cells are editable: Enter moves down, Tab moves right.
-        Cells marked <span className="rounded bg-[var(--color-muted)] px-1">+1</span> include entries or card charges; click
+        Cells marked <span className="rounded bg-[var(--color-muted)] px-1">+1</span> include manual entries or card charges; click
         them to see details.
       </p>
       {loading ? (
@@ -250,7 +250,7 @@ export function YearGrid() {
                       ))}
                     {isOpen && hasEntries.some(Boolean) && (
                       <SummaryRow
-                        label={<span className="pl-5 italic">Entries</span>}
+                        label={<span className="pl-5 italic">Manual entries</span>}
                         values={entryTotals}
                         has={hasEntries}
                         color={colors.categorical[0]}
@@ -553,7 +553,7 @@ function ItemCell({
           over && "text-[var(--color-destructive)]"
         )}
         aria-label={`${item.name} ${formatMonth(month, "short")}: ${formatMoney(total ?? 0)} including ${[
-          linked.length && `${linked.length} ${linked.length > 1 ? "entries" : "entry"}`,
+          linked.length && `${linked.length} ${linked.length > 1 ? "manual entries" : "manual entry"}`,
           card.length && `${card.length} card charge${card.length > 1 ? "s" : ""}`,
         ]
           .filter(Boolean)
@@ -640,7 +640,7 @@ function CellDialog({
     target.kind === "item"
       ? `${target.item.name} · ${formatMonth(month)}`
       : target.kind === "category"
-        ? `${target.category.name} entries · ${formatMonth(month)}`
+        ? `${target.category.name} manual entries · ${formatMonth(month)}`
         : `Uncategorized · ${formatMonth(month)}`;
   const addDefaults =
     target.kind === "item"
@@ -656,7 +656,7 @@ function CellDialog({
           <DialogTitle>{title}</DialogTitle>
           {target.kind === "item" && (
             <DialogDescription>
-              Total {formatMoney(itemMonthTotal(ledger, target.item.id, month) ?? 0, true)} = typed amount + entries
+              Total {formatMoney(itemMonthTotal(ledger, target.item.id, month) ?? 0, true)} = typed amount + manual entries
               {cardList.length > 0 && " + card charges"}
             </DialogDescription>
           )}
@@ -678,7 +678,7 @@ function CellDialog({
           </div>
         )}
         <div className="-mx-4 rounded-md border border-[var(--color-border)] sm:mx-0">
-          <p className="px-4 pt-2 text-xs font-medium text-[var(--color-muted-foreground)]">Entries</p>
+          <p className="px-4 pt-2 text-xs font-medium text-[var(--color-muted-foreground)]">Manual entries</p>
           {list.length ? (
             <OneOffList
               oneOffs={list}
@@ -702,7 +702,7 @@ function CellDialog({
                 onAddOneOff(addDefaults);
               }}
             >
-              <Plus /> Add entry
+              <Plus /> Add manual entry
             </Button>
           </div>
         </div>

@@ -380,22 +380,17 @@ export function Dashboard() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-lg">
-                  <ShoppingBag className="h-4 w-4" aria-hidden /> Largest entries
+                  <ShoppingBag className="h-4 w-4" aria-hidden /> Largest manual entries
                 </CardTitle>
                 <CardDescription>
                   {bigPurchases.length
-                    ? `${formatMoney(yearOneOffTotal)} in entries in ${year}.`
-                    : `No entries in ${year} yet.`}
+                    ? `${formatMoney(yearOneOffTotal)} in manual entries in ${year}.`
+                    : `No manual entries in ${year} yet.`}
                 </CardDescription>
               </CardHeader>
               {bigPurchases.length > 0 && (
                 <OneOffList oneOffs={bigPurchases} categories={categories} items={items} showMonth onEdit={setEditingOneOff} />
               )}
-              <div className="px-4 pb-4 pt-2">
-                <Button asChild variant="ghost" size="sm">
-                  <Link to={`/entries?year=${year}`}>See all entries</Link>
-                </Button>
-              </div>
             </Card>
           </div>
 

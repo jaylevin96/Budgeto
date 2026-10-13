@@ -88,7 +88,7 @@ export function Import() {
             becomes a category, each row a line item, and each filled cell a monthly amount. Totals rows are
             skipped and recalculated. Re-importing is safe: existing items are matched by name and amounts are
             overwritten with the spreadsheet's values. (Don't re-import a Budgeto export into the same account:
-            its cells already include entries and card charges, which would then be counted twice.)
+            its cells already include manual entries and card charges, which would then be counted twice.)
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

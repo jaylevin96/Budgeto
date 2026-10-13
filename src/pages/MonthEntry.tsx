@@ -133,7 +133,7 @@ export function MonthEntry() {
         />
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setEditingOneOff({ oneOff: null })}>
-            <Plus /> Entry
+            <Plus /> Manual entry
           </Button>
           <Button asChild variant="ghost" size="sm">
             <Link to="/import/card">
@@ -212,7 +212,7 @@ export function MonthEntry() {
                     setCardDialog({
                       title: `Unfiled card charges · ${formatMonth(month)}`,
                       description:
-                        "Pick a line item for each. If you already added a purchase as an entry, link it so it isn't counted twice. Choose “Don't count” for anything that isn't household spending.",
+                        "Pick a line item for each. If you already added a purchase as a manual entry, link it so it isn't counted twice. Choose “Don't count” for anything that isn't household spending.",
                       ids: new Set(unfiled.map((t) => t.id)),
                     })
                   }
@@ -274,7 +274,7 @@ export function MonthEntry() {
                 </ul>
                 {catOneOffs.length + catCard.length > 0 && !onlyMissing && (
                   <div className="border-t border-[var(--color-border)]">
-                    <p className="px-4 pt-2 text-xs font-medium text-[var(--color-muted-foreground)]">Entries</p>
+                    <p className="px-4 pt-2 text-xs font-medium text-[var(--color-muted-foreground)]">Manual entries</p>
                     <OneOffList
                       oneOffs={catOneOffs}
                       categories={categories}
@@ -311,7 +311,7 @@ export function MonthEntry() {
                       className="text-[var(--color-primary)]"
                       onClick={() => setEditingOneOff({ oneOff: null, category_id: cat.id })}
                     >
-                      <Plus /> Add entry to {cat.name}
+                      <Plus /> Add manual entry to {cat.name}
                     </Button>
                   </div>
                 )}
@@ -322,7 +322,7 @@ export function MonthEntry() {
           <Card>
             <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
               <h2 className="flex items-center gap-2 font-semibold">
-                <ShoppingBag className="h-4 w-4" aria-hidden /> All entries this month
+                <ShoppingBag className="h-4 w-4" aria-hidden /> All manual entries this month
               </h2>
               <span className="text-sm font-medium tabular-nums">{formatMoney(summary.oneOffs, true)}</span>
             </div>
@@ -335,12 +335,12 @@ export function MonthEntry() {
               />
             ) : (
               <p className="px-4 py-3 text-sm text-[var(--color-muted-foreground)]">
-                No entries this month. Add itemized spending like “Hotel $500” to any category.
+                No manual entries this month. Add itemized spending like “Hotel $500” to any category.
               </p>
             )}
             <div className="px-2 py-1">
               <Button variant="ghost" size="sm" onClick={() => setEditingOneOff({ oneOff: null })}>
-                <Plus /> Add entry
+                <Plus /> Add manual entry
               </Button>
             </div>
           </Card>

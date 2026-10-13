@@ -116,7 +116,7 @@ export async function exportYear(year: number, L: Ledger): Promise<void> {
     const countedAs = t.excluded
       ? "Not counted"
       : t.one_off_id
-        ? `Entry: ${oneOffName.get(t.one_off_id) ?? "(other month)"}`
+        ? `Manual entry: ${oneOffName.get(t.one_off_id) ?? "(other month)"}`
         : item
           ? `${catName.get(item.category_id) ?? ""} › ${item.name}`
           : t.category_id && catName.has(t.category_id)
@@ -130,7 +130,7 @@ export async function exportYear(year: number, L: Ledger): Promise<void> {
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, budgetSheet, "PERSONAL BUDGET");
-  XLSX.utils.book_append_sheet(wb, oneOffSheet, "Entries");
+  XLSX.utils.book_append_sheet(wb, oneOffSheet, "Manual entries");
   if (cardRows.length > 1) XLSX.utils.book_append_sheet(wb, cardSheet, "Card charges");
   XLSX.writeFile(wb, `Budgeto_${year}.xlsx`);
 }

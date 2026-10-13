@@ -17,7 +17,7 @@ import {
   type OneOff,
 } from "@/lib/budget";
 
-/** Add or edit an entry (a one_offs row). `onSaved(id, null)` means it was deleted. */
+/** Add or edit a manual entry (a one_offs row). `onSaved(id, null)` means it was deleted. */
 export function OneOffDialog({
   oneOff,
   defaults,
@@ -90,7 +90,7 @@ export function OneOffDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{oneOff ? "Edit entry" : "New entry"}</DialogTitle>
+          <DialogTitle>{oneOff ? "Edit manual entry" : "New manual entry"}</DialogTitle>
           <DialogDescription>
             A named amount for one month, like “Hotel $500” or “Snorkel tour $120”. Put it in a category (and
             optionally a line item) so it rolls into that total, or leave it uncategorized.
@@ -159,7 +159,7 @@ export function OneOffDialog({
             <div className="space-y-2">
               <Label htmlFor="oo-item">Line item (optional)</Label>
               <Select id="oo-item" value={lineItemId} onChange={(e) => setLineItemId(e.target.value)}>
-                <option value="">None (shows in this category’s entries)</option>
+                <option value="">None (shows in this category’s manual entries)</option>
                 {categoryItems.map((i) => (
                   <option key={i.id} value={i.id}>
                     {i.name}
