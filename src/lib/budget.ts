@@ -253,9 +253,9 @@ export async function createLineItem(
   return { category, item: { ...item, default_amount: num(item.default_amount) } };
 }
 
-const ONE_OFF_COLUMNS = "id, name, amount, month, category_id, line_item_id, note, recurring_id";
+export const ONE_OFF_COLUMNS = "id, name, amount, month, category_id, line_item_id, note, recurring_id";
 
-const toOneOff = (o: OneOff): OneOff => ({ ...o, amount: Number(o.amount) });
+export const toOneOff = (o: OneOff): OneOff => ({ ...o, amount: Number(o.amount) });
 
 /** Manual entries for months in [fromKey, toKeyExclusive) */
 export async function fetchOneOffs(fromKey: string, toKeyExclusive: string): Promise<OneOff[]> {

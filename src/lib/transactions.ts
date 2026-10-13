@@ -75,11 +75,11 @@ export const categoryValue = (categoryId: string) => CATEGORY + categoryId;
 
 // ---------- Data access ----------
 
-const TX_COLUMNS =
+export const TX_COLUMNS =
   "id, import_id, posted_on, month, description, merchant, card_member, source_category, amount, line_item_id, category_id, one_off_id, excluded";
 const IMPORT_COLUMNS = "id, source, account_label, period_start, period_end, file_name, row_count, total, created_at";
 
-const toTx = (t: Transaction): Transaction => ({ ...t, amount: Number(t.amount) });
+export const toTx = (t: Transaction): Transaction => ({ ...t, amount: Number(t.amount) });
 
 /** Card transactions for months in [fromKey, toKeyExclusive) */
 export async function fetchTransactions(fromKey: string, toKeyExclusive: string): Promise<Transaction[]> {

@@ -13,12 +13,15 @@ import {
   FolderPlus,
   ListPlus,
   Plus,
+  Search,
   Settings2,
   Target,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
+import { Input } from "@/components/ui/input";
 import { BudgetBar } from "@/components/BudgetBar";
 import { BudgetDialog } from "@/components/BudgetDialog";
 import { CardActivity } from "@/components/CardActivity";
@@ -27,6 +30,7 @@ import { EmptyBudget } from "@/components/EmptyBudget";
 import { OneOffDialog } from "@/components/OneOffDialog";
 import { CardChargesRow, OneOffList } from "@/components/OneOffList";
 import { RecurringDialog, RecurringPanel } from "@/components/RecurringPanel";
+import { SearchResults } from "@/components/SearchResults";
 import { CategoryDialog, ItemDialog } from "@/components/StructureDialogs";
 import { StepperNav } from "@/components/StepperNav";
 import { SummaryTiles } from "@/components/SummaryTiles";
@@ -55,6 +59,7 @@ import {
   type OneOff,
 } from "@/lib/budget";
 import type { RecurringEntry } from "@/lib/recurring";
+import { matchesQuery, sortRows, type SearchRow } from "@/lib/search";
 import type { Transaction } from "@/lib/transactions";
 import { cn } from "@/lib/utils";
 
@@ -106,6 +111,10 @@ export function MonthEntry() {
   const [cardDialog, setCardDialog] = useState<{ title: string; description: string; ids: Set<string> } | null>(null);
   // Categories folded down to their header; remembered across months and visits
   const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
+  // Search within this month; a query typed in another month doesn't carry over
+  const [search, setSearch] = useState({ month, q: "" });
+  const query = search.month === month ? search.q : "";
+  const searching = query.trim() !== "";
 
   useEffect(() => {
     try {
@@ -137,6 +146,13 @@ export function MonthEntry() {
 
   const showCard = (title: string, description: string, card: Transaction[]) =>
     setCardDialog({ title, description, ids: new Set(card.map((t) => t.id)) });
+
+  const searchRows: SearchRow[] = searching
+    ? sortRows([
+        ...transactions.filter((t) => t.month === month).map((t): SearchRow => ({ kind: "card", tx: t })),
+        ...oneOffs.filter((o) => o.month === month).map((o): SearchRow => ({ kind: "manual", oneOff: o })),
+      ]).filter((r) => matchesQuery(r, query))
+    : [];
 
   const go = (delta: number) => navigate(`/month/${monthSlug(addMonths(month, delta))}`);
   const allCollapsed = activeCategories.length > 0 && activeCategories.every((c) => collapsed.has(c.id));
@@ -188,10 +204,62 @@ export function MonthEntry() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="relative min-w-0 flex-1 sm:max-w-sm">
+          <Search
+            className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[var(--color-muted-foreground)]"
+            aria-hidden
+          />
+          <Input
+            type="search"
+            value={query}
+            onChange={(e) => setSearch({ month, q: e.target.value })}
+            onKeyDown={(e) => e.key === "Escape" && setSearch({ month, q: "" })}
+            placeholder={`Search ${formatMonth(month)}`}
+            aria-label={`Search transactions in ${formatMonth(month)}`}
+            className="pr-9 pl-9 [&::-webkit-search-cancel-button]:hidden"
+          />
+          {searching && (
+            <button
+              type="button"
+              onClick={() => setSearch({ month, q: "" })}
+              aria-label="Clear search"
+              className="absolute top-1/2 right-2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        <Link
+          to={searching ? `/search?q=${encodeURIComponent(query.trim())}` : "/search"}
+          className="text-sm font-medium text-[var(--color-primary)] hover:underline"
+        >
+          Search all months
+        </Link>
+      </div>
+
       {error && <FormError>{error}</FormError>}
 
       {loading ? (
         <p className="text-[var(--color-muted-foreground)]">Loading…</p>
+      ) : searching ? (
+        <Card className="p-2 sm:p-3">
+          {searchRows.length === 0 ? (
+            <p className="px-2 py-3 text-sm text-[var(--color-muted-foreground)]">
+              Nothing in {formatMonth(month)} matches “{query.trim()}”.
+            </p>
+          ) : (
+            <SearchResults
+              rows={searchRows}
+              categories={categories}
+              items={items}
+              oneOffs={oneOffs}
+              onTransactionsSaved={applyTransactions}
+              onOneOffSaved={applyOneOff}
+              onCreated={applyCreated}
+            />
+          )}
+        </Card>
       ) : (
         <>
 

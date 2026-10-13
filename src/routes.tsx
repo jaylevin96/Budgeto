@@ -11,6 +11,7 @@ import { Settings } from "@/pages/Settings";
 // Charts (recharts) and the spreadsheet parser (xlsx) are heavy; load them on demand
 const Dashboard = lazy(() => import("@/pages/Dashboard").then((m) => ({ default: m.Dashboard })));
 const Import = lazy(() => import("@/pages/Import").then((m) => ({ default: m.Import })));
+const Search = lazy(() => import("@/pages/Search").then((m) => ({ default: m.Search })));
 const CardImport = lazy(() => import("@/pages/CardImport").then((m) => ({ default: m.CardImport })));
 
 function FullPageLoading() {
@@ -60,6 +61,7 @@ export function AppRoutes() {
         <Route path="/month/:month" element={<MonthEntry />} />
         <Route path="/year" element={<YearGrid />} />
         <Route path="/year/:year" element={<YearGrid />} />
+        <Route path="/search" element={<Search />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/settings/import" element={<Import />} />
         <Route path="/import/card" element={<CardImport />} />

@@ -40,6 +40,8 @@ export function DestinationSelect({
   items,
   oneOffs,
   onCreated,
+  allowExclude = true,
+  uncategorizedLabel = "Uncategorized",
   className,
   ...props
 }: {
@@ -50,6 +52,9 @@ export function DestinationSelect({
   /** One-offs the charge could be covered by (same month) */
   oneOffs: OneOff[];
   onCreated?: (created: CreatedStructure) => void;
+  /** Offer "Don't count" (card charges only) */
+  allowExclude?: boolean;
+  uncategorizedLabel?: string;
   className?: string;
   "aria-label"?: string;
   disabled?: boolean;
@@ -68,7 +73,7 @@ export function DestinationSelect({
         className={cn("h-9", !value && "border-[var(--color-warning)]", className)}
         {...props}
       >
-        <option value="">Uncategorized</option>
+        <option value="">{uncategorizedLabel}</option>
         {onCreated && <option value={NEW_CATEGORY}>+ New category…</option>}
         {onCreated && <option value={NEW_ITEM}>+ New line item…</option>}
         {categories
@@ -94,7 +99,7 @@ export function DestinationSelect({
             ))}
           </optgroup>
         )}
-        <option value={EXCLUDE}>Don't count</option>
+        {allowExclude && <option value={EXCLUDE}>Don't count</option>}
       </Select>
       {creating && onCreated && (
         <NewDestinationDialog
