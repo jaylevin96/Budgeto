@@ -225,24 +225,43 @@ export type Assignment = {
 
 const PAYMENT = /(autopay payment|payment - thank you|online payment|mobile payment)/i;
 
-/** Built-in guesses by Amex category, as [category name, line item name] in the default budget. */
-const CATEGORY_DEFAULTS: [RegExp, string, string][] = [
-  [/^restaurant-/i, "Daily Living", "Dining out"],
-  [/^merchandise & supplies-groceries$/i, "Daily Living", "Groceries"],
-  [/^travel-lodging$/i, "Vacations", "Accommodations"],
-  [/^travel-airline/i, "Vacations", "Plane fare"],
-  [/^travel-vehicle rental$/i, "Vacations", "Rental car"],
-  [/^transportation-fuel/i, "Transportation", "Gas/fuel"],
-  [/^merchandise & supplies-(clothing|department)/i, "Personal", "Clothing"],
-  [/^merchandise & supplies-book/i, "Personal", "Books"],
-  [/^entertainment-theatrical/i, "Entertainment", "Movies/plays"],
-  [/^communications-cable/i, "Entertainment", "Cable TV"],
+/**
+ * Built-in guesses by Amex category: [pattern, category name, line item names]. The first
+ * line item that exists in the budget wins (names match ignoring case, spaces and "and"/"&"),
+ * so a guess only applies when you have a line item by one of those names.
+ */
+const CATEGORY_DEFAULTS: [RegExp, string, string[]][] = [
+  [/^restaurant-/i, "Daily Living", ["Dining out"]],
+  [/^merchandise & supplies-groceries$/i, "Daily Living", ["Groceries"]],
+  [/^merchandise & supplies-internet purchase/i, "Daily Living", ["Online shopping", "Amazon", "Shopping"]],
+  [/^merchandise & supplies-(furnishing|hardware|home)/i, "Home", ["Home furnishings", "Furnishings", "Furniture", "Home goods", "Household"]],
+  [/^merchandise & supplies-pharmac/i, "Health", ["Pharmacy", "Pharmacies", "Prescriptions"]],
+  [/^merchandise & supplies-(clothing|department)/i, "Personal", ["Clothing"]],
+  [/^merchandise & supplies-book/i, "Personal", ["Books"]],
+  [/^merchandise & supplies-sporting/i, "Personal", ["Fitness", "Sporting goods"]],
+  [/^travel-lodging$/i, "Vacations", ["Accommodations"]],
+  [/^travel-airline/i, "Vacations", ["Plane fare"]],
+  [/^travel-vehicle rental$/i, "Vacations", ["Rental car"]],
+  [/^transportation-fuel/i, "Transportation", ["Gas/fuel"]],
+  [/^transportation-(taxis|other transportation)/i, "Transportation", ["Rideshare / Taxis", "Rideshare", "Taxis", "Uber/Lyft"]],
+  [/^entertainment-theatrical/i, "Entertainment", ["Movies/plays"]],
+  [/^communications-cable/i, "Entertainment", ["Cable TV"]],
+  [/^other-government services/i, "Misc Payments", ["Fees & government", "Fees", "Government fees", "Taxes & fees"]],
+  [/^business services-(mailing|shipping)/i, "Misc Payments", ["Shipping", "Postage", "Shipping & postage"]],
 ];
 
 /** Built-in guesses by merchant, checked before the category defaults. */
-const MERCHANT_DEFAULTS: [RegExp, string, string][] = [
-  [/^NETFLIX/, "Subscriptions", "Netflix"],
-  [/^HULU/, "Subscriptions", "Hulu"],
+const MERCHANT_DEFAULTS: [RegExp, string, string[]][] = [
+  [/^NETFLIX/, "Subscriptions", ["Netflix"]],
+  [/^HULU/, "Subscriptions", ["Hulu"]],
+  [/^(UBER|LYFT)\b/, "Transportation", ["Rideshare / Taxis", "Rideshare", "Taxis", "Uber/Lyft"]],
+  [/^ZOLA/, "Personal", ["Gifts"]],
+  [/\b(PEETS|STARBUCKS|DUNKIN|BLUE BOTTLE|INTELLIGENTSIA)\b/, "Daily Living", ["Dining out"]],
+  [/^(AMAZON|AMZN)/, "Daily Living", ["Online shopping", "Amazon", "Shopping"]],
+  [/^(CRATE & BARREL|HOMEGOODS|IKEA|WAYFAIR|POTTERY BARN|WEST ELM|CB2)/, "Home", ["Home furnishings", "Furnishings", "Furniture", "Home goods", "Household"]],
+  [/^(WALGREENS|CVS)/, "Health", ["Pharmacy", "Pharmacies", "Prescriptions"]],
+  [/^FLEET FEET/, "Personal", ["Fitness", "Sporting goods"]],
+  [/^(THE UPS STORE|UPS|USPS|FEDEX)\b/, "Misc Payments", ["Shipping", "Postage", "Shipping & postage"]],
 ];
 
 type Named = { id: string; name: string };
@@ -262,13 +281,22 @@ export function categorize(
   const categoryRules = new Map(
     rules.filter((r) => r.match_type === "source_category").map((r) => [r.pattern.toLowerCase(), r])
   );
-  const key = (s: string) => s.trim().toLowerCase();
+  // "Rideshare / Taxis" = "rideshare/taxis"; "Fees and government" = "Fees & government"
+  const key = (s: string) => s.toLowerCase().replace(/\band\b/g, "&").replace(/\s+/g, "");
   const catName = new Map(categories.map((c) => [c.id, key(c.name)]));
   const live = items.filter((i) => !i.archived);
-  const findItem = (category: string, item: string) =>
-    live.find((i) => key(i.name) === key(item) && catName.get(i.category_id) === key(category))?.id ??
-    live.find((i) => key(i.name) === key(item))?.id ??
-    null;
+  /** First of `names` that exists, preferring one in `category` */
+  const findItem = (category: string, names: string[]) => {
+    for (const n of names) {
+      const id = live.find((i) => key(i.name) === key(n) && catName.get(i.category_id) === key(category))?.id;
+      if (id) return id;
+    }
+    for (const n of names) {
+      const id = live.find((i) => key(i.name) === key(n))?.id;
+      if (id) return id;
+    }
+    return null;
+  };
   const fromRule = (r: Rule, reason: Assignment["reason"]): Assignment => ({
     lineItemId: r.exclude ? null : r.line_item_id,
     excluded: r.exclude,

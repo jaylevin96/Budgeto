@@ -66,7 +66,11 @@ Sign in, go to **Settings → Import**, choose `2026_Budget.xlsx`, check the pre
 On americanexpress.com open **Statements & Activity**, choose the statement and **Download → Excel**. In Budgeto, go to **Month → Import Amex** (or **Settings → Import Amex**) and choose the file.
 
 1. The statement's totals are checked against its summary sheet, and charges already imported are skipped. Uploading a statement twice is harmless.
-2. Each charge gets a destination: your remembered choice for that merchant, a suggestion from Amex's category (restaurants → Dining out, lodging → Accommodations, …), or **Uncategorized**. Card payments are left out automatically, and "Amex Split" credits from friends reduce the meal they paid back.
+2. Each charge gets a destination: your remembered choice for that merchant, a built-in suggestion, or **Uncategorized**. Built-in suggestions only apply when a line item by that name exists (case, spaces and "and"/"&" don't matter):
+   - Dining out (restaurants, coffee shops), Groceries, Accommodations, Plane fare, Rental car, Gas/fuel, Clothing, Books, Movies/plays, Cable TV, Netflix, Hulu, Gifts (Zola)
+   - **Rideshare / Taxis** (Transportation: Uber, Lyft, shuttles), **Home furnishings** (Home: Crate & Barrel, HomeGoods, IKEA…), **Online shopping** (Daily Living: Amazon, online purchases), **Pharmacy** (Health: Walgreens, CVS), **Fees & government** (Misc Payments), **Shipping** (Misc Payments: UPS, FedEx, USPS), **Fitness** (Personal: sporting goods, Fleet Feet)
+
+   Add the line items in bold under **Settings** to use them. Card payments are left out automatically, and "Amex Split" credits from friends reduce the meal they paid back.
 3. If you already typed a purchase in as a one-off, the matching charge(s) are linked to it so it isn't counted twice. Charges of $500 or more start out marked **One-off** so they show with big purchases.
 4. A warning appears when a charge lands on a line that already has a typed amount that month (e.g. Netflix typed by hand *and* on the card). Choose **Don't count** or clear the typed amount.
 5. Click **Import**. Anything left uncategorized still counts as spending and shows as a "Review" banner on that Month page.
