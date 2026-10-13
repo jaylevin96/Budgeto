@@ -8,12 +8,15 @@ import {
   type LineItem,
   type OneOff,
 } from "@/lib/budget";
+import { ensureOccurrences, fetchRecurring, type RecurringEntry } from "@/lib/recurring";
 import { fetchTransactions, type Transaction } from "@/lib/transactions";
 
 type State = {
   categories: Category[];
   items: LineItem[];
   oneOffs: OneOff[];
+  /** Every recurring entry (any month) */
+  recurring: RecurringEntry[];
   /** Card transactions, including excluded and one-off-covered ones */
   transactions: Transaction[];
   loading: boolean;
@@ -26,20 +29,25 @@ export function useBudget(fromKey: string, toKeyExclusive: string) {
     categories: [],
     items: [],
     oneOffs: [],
+    recurring: [],
     transactions: [],
     loading: true,
     error: null,
   });
 
-  const load = useCallback(async () => {
-    setState((s) => ({ ...s, loading: true, error: null }));
+  /** `quiet` refetches without showing the loading state (after edits that touch many rows) */
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setState((s) => ({ ...s, loading: true, error: null }));
     try {
+      // Recurring entries first: create any months they're due for, so the entries below include them
+      const recurring = await fetchRecurring();
+      await ensureOccurrences(recurring);
       const [structure, oneOffs, transactions] = await Promise.all([
         fetchStructure(),
         fetchOneOffs(fromKey, toKeyExclusive),
         fetchTransactions(fromKey, toKeyExclusive),
       ]);
-      setState({ ...structure, oneOffs, transactions, loading: false, error: null });
+      setState({ ...structure, oneOffs, recurring, transactions, loading: false, error: null });
     } catch (err) {
       setState((s) => ({ ...s, loading: false, error: err instanceof Error ? err.message : "Failed to load" }));
     }
@@ -48,6 +56,8 @@ export function useBudget(fromKey: string, toKeyExclusive: string) {
   useEffect(() => {
     load();
   }, [load]);
+
+  const refresh = useCallback(() => load(true), [load]);
 
   /** Apply a saved manual entry, or remove it when `saved` is null. */
   const applyOneOff = useCallback((id: string, saved: OneOff | null) => {
@@ -87,5 +97,5 @@ export function useBudget(fromKey: string, toKeyExclusive: string) {
     [state.categories, state.items, state.oneOffs, state.transactions]
   );
 
-  return { ...state, ledger, reload: load, applyOneOff, applyOneOffs, applyTransactions, applyCreated };
+  return { ...state, ledger, reload: load, refresh, applyOneOff, applyOneOffs, applyTransactions, applyCreated };
 }

@@ -282,7 +282,7 @@ function CategoryDialog({
     if (!category) return;
     if (
       !window.confirm(
-        `Delete "${category.name}", ALL of its line items and every manual entry in it? Its card charges go back to unfiled. Archive it instead to keep history.`
+        `Delete "${category.name}", ALL of its line items, recurring entries and every manual entry in it? Its card charges go back to unfiled. Archive it instead to keep history.`
       )
     )
       return;

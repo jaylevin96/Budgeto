@@ -55,7 +55,7 @@ export function Dashboard() {
   const thisYear = parseMonthKey(thisMonth).year;
   const year = Number(searchParams.get("year")) || thisYear;
 
-  const { categories, items, oneOffs, ledger, loading, error, reload, applyOneOff } = useBudget(
+  const { categories, items, oneOffs, recurring, ledger, loading, error, reload, refresh, applyOneOff } = useBudget(
     monthKey(year - 1, 0),
     monthKey(year + 1, 0)
   );
@@ -172,7 +172,7 @@ export function Dashboard() {
         oneOff: null,
       })),
     ...oneOffs
-      .filter((o) => o.month === selectedMonth && !o.repeats && o.amount > 0)
+      .filter((o) => o.month === selectedMonth && !o.recurring_id && o.amount > 0)
       .map((o) => ({ o, place: placeOf(o.line_item_id, o.category_id) }))
       .filter(({ place }) => isSpending(place.kind))
       .map(({ o, place }) => ({ id: o.id, name: o.name, detail: `Manual entry · ${place.name}`, amount: o.amount, oneOff: o })),
@@ -510,7 +510,12 @@ export function Dashboard() {
           defaults={{ month: editingOneOff.month }}
           categories={categories}
           items={items}
+          recurring={recurring}
           onClose={() => setEditingOneOff(null)}
+          onRecurringChanged={() => {
+            setEditingOneOff(null);
+            refresh();
+          }}
           onSaved={(id, saved) => {
             setEditingOneOff(null);
             applyOneOff(id, saved);

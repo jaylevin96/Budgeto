@@ -38,8 +38,8 @@ export type OneOff = {
   category_id: string | null;
   line_item_id: string | null;
   note: string | null;
-  /** Offered for copying into the next month */
-  repeats: boolean;
+  /** Set when this is one month of a recurring entry (see recurring.ts) */
+  recurring_id: string | null;
 };
 
 export const KIND_LABEL: Record<CategoryKind, string> = {
@@ -193,7 +193,7 @@ export async function createLineItem(
   return { category, item: { ...item, default_amount: num(item.default_amount), monthly_budget: num(item.monthly_budget) } };
 }
 
-const ONE_OFF_COLUMNS = "id, name, amount, month, category_id, line_item_id, note, repeats";
+const ONE_OFF_COLUMNS = "id, name, amount, month, category_id, line_item_id, note, recurring_id";
 
 const toOneOff = (o: OneOff): OneOff => ({ ...o, amount: Number(o.amount) });
 
@@ -455,24 +455,6 @@ export function oneOffTarget(o: OneOff, categories: Category[], items: LineItem[
   if (item && cat) return `${cat.name} › ${item.name}`;
   if (cat) return cat.name;
   return "Needs a category";
-}
-
-/**
- * Last month's repeating manual entries that this month doesn't have yet (same name and
- * place). Skips line items already paid by card this month so a bill isn't counted twice.
- */
-export function repeatingToCopy(L: Ledger, month: string): OneOff[] {
-  const prev = addMonths(month, -1);
-  const place = (o: OneOff) => `${o.line_item_id ?? ""}|${o.category_id ?? ""}|${o.name.trim().toLowerCase()}`;
-  const have = new Set(L.oneOffs.filter((o) => o.month === month).map(place));
-  return L.oneOffs.filter(
-    (o) =>
-      o.month === prev &&
-      o.repeats &&
-      o.category_id !== null &&
-      !have.has(place(o)) &&
-      !(o.line_item_id && itemCard(L, o.line_item_id, month).length > 0)
-  );
 }
 
 // ---------- Default structure (from the 2026 spreadsheet) ----------

@@ -1,10 +1,14 @@
 import { supabase } from "@/lib/supabase";
+import { fetchRecurring } from "@/lib/recurring";
 import {
   fetchStructure,
   DEFAULT_STRUCTURE,
+  addMonths,
+  currentMonthKey,
   fetchOneOffs,
   insertOneOffs,
   monthKey,
+  type LineItem,
   type CategoryKind,
   type OneOffInput,
   type Recurrence,
@@ -173,34 +177,76 @@ export async function applyBudget(
     ({ categories, items } = await fetchStructure());
     const itemByKey = new Map(items.map((i) => [itemKey(i.category_id, i.name), i]));
     // Each filled cell becomes a manual entry named after its line item. A typed 0 only meant
-    // "nothing this month", so it's skipped.
-    const rows: OneOffInput[] = [];
+    // "nothing this month", so it's skipped. Rows filled most months become a recurring entry
+    // (open-ended if they reach last month, so later months fill themselves in).
+    type Planned = { item: LineItem; cid: string; recurring: boolean; cells: { month: string; amount: number }[] };
+    const planned: Planned[] = [];
     for (const s of sections) {
       const cid = catId.get(key(s.name))!;
       for (const it of s.items) {
         const item = itemByKey.get(itemKey(cid, it.name));
         if (!item) continue;
-        it.values.forEach((v, m) => {
-          if (v !== null && v > 0)
-            rows.push({
-              name: item.name,
-              amount: v,
-              month: monthKey(year, m),
-              category_id: cid,
-              line_item_id: item.id,
-              note: null,
-              repeats: it.recurrence !== "none",
-            });
-        });
+        const cells = it.values.flatMap((v, m) => (v !== null && v > 0 ? [{ month: monthKey(year, m), amount: v }] : []));
+        if (cells.length) planned.push({ item, cid, recurring: it.recurrence !== "none", cells });
       }
     }
-    // Re-importing replaces the entries an earlier import made for those cells (same line, month and name)
+
+    // Re-importing replaces what an earlier import made: its recurring entries (with all their
+    // months) and its entries for the same line, month and name
+    const recurringKey = (lineItemId: string | null, name: string) => `${lineItemId}|${key(name)}`;
+    const plannedRecurring = new Set(planned.filter((p) => p.recurring).map((p) => recurringKey(p.item.id, p.item.name)));
+    const oldSeries = (await fetchRecurring()).filter(
+      (r) => r.start_month.startsWith(`${year}-`) && plannedRecurring.has(recurringKey(r.line_item_id, r.name))
+    );
+    if (oldSeries.length) {
+      const { error } = await supabase.from("recurring_entries").delete().in("id", oldSeries.map((r) => r.id));
+      if (error) throw error;
+    }
     const cell = (o: { line_item_id: string | null; month: string; name: string }) => `${o.line_item_id}|${o.month}|${key(o.name)}`;
-    const cells = new Set(rows.map(cell));
-    const stale = (await fetchOneOffs(monthKey(year, 0), monthKey(year + 1, 0))).filter((o) => cells.has(cell(o)));
+    const cellKeys = new Set(planned.flatMap((p) => p.cells.map((c) => cell({ line_item_id: p.item.id, month: c.month, name: p.item.name }))));
+    const stale = (await fetchOneOffs(monthKey(year, 0), monthKey(year + 1, 0))).filter((o) => cellKeys.has(cell(o)));
     for (let i = 0; i < stale.length; i += 200) {
       const { error } = await supabase.from("one_offs").delete().in("id", stale.slice(i, i + 200).map((o) => o.id));
       if (error) throw error;
+    }
+
+    const lastMonth = addMonths(currentMonthKey(), -1);
+    const rows: OneOffInput[] = [];
+    for (const p of planned) {
+      let recurringId: string | null = null;
+      if (p.recurring) {
+        const first = p.cells[0].month;
+        const last = p.cells[p.cells.length - 1].month;
+        const filled = new Set(p.cells.map((c) => c.month));
+        const skips: string[] = [];
+        for (let m = first; m < last; m = addMonths(m, 1)) if (!filled.has(m)) skips.push(m);
+        const { data, error } = await supabase
+          .from("recurring_entries")
+          .insert({
+            name: p.item.name,
+            amount: p.cells[p.cells.length - 1].amount,
+            category_id: p.cid,
+            line_item_id: p.item.id,
+            start_month: first,
+            end_month: last >= lastMonth ? null : last,
+            skip_months: skips,
+          })
+          .select("id")
+          .single();
+        if (error) throw error;
+        recurringId = (data as { id: string }).id;
+      }
+      for (const c of p.cells) {
+        rows.push({
+          name: p.item.name,
+          amount: c.amount,
+          month: c.month,
+          category_id: p.cid,
+          line_item_id: p.item.id,
+          note: null,
+          recurring_id: recurringId,
+        });
+      }
     }
     result.entriesSaved = (await insertOneOffs(rows)).length;
   }
