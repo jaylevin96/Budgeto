@@ -70,7 +70,7 @@ On americanexpress.com open **Statements & Activity**, choose the statement and 
    - Dining out (restaurants, coffee shops), Groceries, Accommodations, Plane fare, Rental car, Gas/fuel, Clothing, Books, Movies/plays, Cable TV, Netflix, Hulu, Gifts (Zola)
    - **Rideshare / Taxis** (Transportation: Uber, Lyft, shuttles), **Home furnishings** (Home: Crate & Barrel, HomeGoods, IKEA…), **Online shopping** (Daily Living: Amazon, online purchases), **Pharmacy** (Health: Walgreens, CVS), **Fees & government** (Misc Payments), **Shipping** (Misc Payments: UPS, FedEx, USPS), **Fitness** (Personal: sporting goods, Fleet Feet)
 
-   Add the line items in bold under **Settings** to use them. Card payments are left out automatically, and "Amex Split" credits from friends reduce the meal they paid back.
+   To add the ones in bold in one go, run [`supabase/scripts/add_amex_line_items.sql`](supabase/scripts/add_amex_line_items.sql) in the SQL Editor (after the migrations). It skips any you already have, under any of the accepted names, and is safe to run again. Or add them under **Settings**. Card payments are left out automatically, and "Amex Split" credits from friends reduce the meal they paid back.
 3. If you already typed a purchase in as a one-off, the matching charge(s) are linked to it so it isn't counted twice. Charges of $500 or more start out marked **One-off** so they show with big purchases.
 4. A warning appears when a charge lands on a line that already has a typed amount that month (e.g. Netflix typed by hand *and* on the card). Choose **Don't count** or clear the typed amount.
 5. Click **Import**. Anything left uncategorized still counts as spending and shows as a "Review" banner on that Month page.
