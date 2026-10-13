@@ -16,7 +16,7 @@ export function BrandMark({ size = "md", showName = true, className }: { size?: 
       {showName && (
         <span
           className={cn(
-            "font-display font-semibold tracking-tight",
+            "font-bold tracking-tight",
             size === "lg" ? "text-3xl" : "text-xl"
           )}
         >

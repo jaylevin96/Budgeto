@@ -150,7 +150,7 @@ export function CardActivity({
             <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-muted-foreground)]">
               Added to {formatMonth(month, "short")}
             </p>
-            <p className="font-display text-3xl font-semibold tracking-tight tabular-nums">{formatMoney(total)}</p>
+            <p className="text-3xl font-bold tracking-tight tabular-nums">{formatMoney(total)}</p>
             <p className="text-xs text-[var(--color-muted-foreground)]">
               {counted.length} {counted.length === 1 ? "charge" : "charges"}
               {credits < 0 && ` · ${formatMoney(credits, true)} in credits`}

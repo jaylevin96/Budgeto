@@ -82,7 +82,7 @@ export function Settings() {
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-3xl font-semibold tracking-tight">Categories &amp; line items</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Categories &amp; line items</h1>
           <p className="text-sm text-[var(--color-muted-foreground)]">
             The rows of your budget. Recurring items are pre-filled on the Month page.
           </p>
