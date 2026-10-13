@@ -7,23 +7,22 @@ Same stack as Tracko: Vite + React 19 + TypeScript, Tailwind v4 + shadcn/ui, Sup
 ## How it works
 
 - **Categories** (Income, Home, Daily Living, …) have a type: income, spending or savings. 401k and HSA go under a savings category ("Financial Obligations"), so they're tracked, but not counted as spending.
-- **Line items** (Rent, Comed, Jay Wage, …) are the rows. Each one is *fixed* (same amount monthly), *monthly, amount varies* (utilities) or *occasional*.
-- **Monthly amounts**: one total per line item per month, just like a spreadsheet cell. An empty cell means "not entered yet"; `0` means "nothing this month".
-- **Entries** ("Hotel $500", "Snorkel tour $120") are itemized amounts you add by hand, each with a name and a month. Tie one to a line item and it adds to that item's month; tie it to just a category and it shows in that category's "Entries" row; leave it untied and it counts as uncategorized spending. (Stored in the `one_offs` table; they were called one-offs before.)
-- **Amex charges**, imported monthly from the statement download, add on top of what's typed. Each charge counts once, following the same rule as entries: filed under a line item (adds to that cell), filed to a category with no specific line (shows in that category's Entries row), unfiled (counts as uncategorized spending until filed), linked to an entry you already added by hand (the entry counts instead), or "don't count" (card payments). Merchant choices are remembered, so later months mostly file themselves. See [`docs/AMEX_IMPORT.md`](docs/AMEX_IMPORT.md).
+- **Line items** (Rent, Groceries, Jay Wage, …) are optional rows within a category.
+- **Totals come from two sources only: card charges and manual entries.** There is no typed amount per cell.
+- **Manual entries** ("Rent $2,000", "Hotel $500") are named amounts you add to a category for one month, with **+ Add manual entry** in that category on the Month page (or by clicking a cell in the Year grid). Pick a line item to roll it into that line; otherwise it shows in the category's **Other** row. Mark one **Repeats monthly** (rent, wages, subscriptions) and next month's page offers **Repeat N from {last month}** to copy them in one click. (Stored in the `one_offs` table.)
+- **Amex charges**, imported monthly from the statement download. Each charge counts once, following the same rule as manual entries: filed under a line item (adds to that line), filed to a category with no specific line (shows in that category's Other row), unfiled (counts as uncategorized spending until filed), linked to a manual entry you already added (the manual entry counts instead), or "don't count" (card payments). Merchant choices are remembered, so later months mostly file themselves. See [`docs/AMEX_IMPORT.md`](docs/AMEX_IMPORT.md).
 - **Budgets** (optional): a monthly target on any category or line item, shown as budget vs actual.
-- **Notes**: any entered cell can carry a note (e.g. "AC ran all month").
-- **Left over** = income − spending − savings, calculated per month (entries and card charges included).
+- **Notes**: any manual entry can carry a note (e.g. "AC ran all month").
+- **Left over** = income − spending − savings, calculated per month (manual entries and card charges included).
 
 ### Pages
 
 | Page | What it's for |
 |---|---|
-| **Dashboard** `/` | Month and year-to-date totals with changes, income vs spending by month, spending by category, where the money went, budget vs actual, largest entries, biggest changes vs last month |
-| **Month** `/month/2026-10` | Data entry. **Fill recurring** enters every fixed and recent monthly amount in one click. Type the rest; Enter jumps to the next field and each value saves on its own. Warns when an amount is far from that item's usual. Add entries to any category, add notes, and see budget bars per category. |
-| **Year** `/year/2026` | The spreadsheet view. Categories collapse to their totals and expand into editable line items (Enter moves down, Tab moves right). Cells marked `+1` include entries or card charges; click to see them. Shows year total, average, budget and a trend sparkline. **Export .xlsx** downloads the year in the spreadsheet's layout. |
-| **Entries** `/entries` | Every entry in a year, grouped by month |
-| **Settings** `/settings` | Add, rename, reorder or archive categories and line items; set recurring amounts |
+| **Dashboard** `/` | Month and year-to-date totals with changes, income vs spending by month, spending by category, where the money went, budget vs actual, largest one-time manual entries, biggest changes vs last month |
+| **Month** `/month/2026-10` | Each category lists its line items and Other row, with the manual entries (pencil) and Amex charges (card) that make up each total, plus **+ Add manual entry**. **Repeat N from …** copies last month's repeating entries. Banners for unfiled card charges. Budget bars per category. |
+| **Year** `/year/2026` | The spreadsheet view. Categories collapse to their totals and expand into line items and an Other row. Click any cell to see its manual entries and card charges or add one. Shows year total, average, budget and a trend sparkline. **Export .xlsx** downloads the year in the spreadsheet's layout. |
+| **Settings** `/settings` | Add, rename, reorder or archive categories and line items; set budgets |
 | **Import** `/settings/import` | One-time import of the `.xlsx` budget, with a preview of totals before saving |
 | **Import Amex** `/import/card` | Monthly: upload the Amex Excel/CSV download, review where each charge goes, import. Lists past imports with **Undo**. |
 
@@ -38,6 +37,7 @@ The Supabase project is shared with Tracko and Resybot, so every Budgeto object 
    - `20261020000000_one_offs_budgets.sql` (one-off purchases and monthly budgets)
    - `20261021000000_card_import.sql` (Amex import: imports, transactions, merchant rules)
    - `20261022000000_card_category.sql` (lets a card charge be filed to a category without a specific line item)
+   - `20261023000000_manual_entries_only.sql` (turns every typed monthly amount into a manual entry on its line item and adds "repeats monthly"; totals come only from manual entries and card charges after this)
 2. Go to **Project Settings → Data API → Exposed schemas** and add `budgeto`. Without this step, API calls fail with "schema must be one of the following".
 
 Run migrations from the SQL editor rather than `supabase db push`. The project's migration history also contains Tracko's migrations, which this repo doesn't have.
@@ -60,7 +60,7 @@ Import the repo in Vercel (framework preset: Vite) and set `VITE_SUPABASE_URL` a
 
 ### 5. Bring in the spreadsheet
 
-Sign in, go to **Settings → Import**, choose `2026_Budget.xlsx`, check the preview and click **Import**. Re-importing is safe: items are matched by name and amounts are overwritten.
+Sign in, go to **Settings → Import**, choose `2026_Budget.xlsx`, check the preview and click **Import**. Each filled cell becomes a manual entry on its line item (rows filled most months are marked as repeating). Re-importing is safe: items are matched by name and the entries an earlier import made are replaced.
 
 ### 6. Each month: import the Amex statement
 
@@ -72,7 +72,7 @@ On americanexpress.com open **Statements & Activity**, choose the statement and 
    - **Rideshare / Taxis** (Transportation: Uber, Lyft, shuttles), **Home furnishings** (Home: Crate & Barrel, HomeGoods, IKEA…), **Online shopping** (Daily Living: Amazon, online purchases), **Pharmacy** (Health: Walgreens, CVS), **Fees & government** (Misc Payments), **Shipping** (Misc Payments: UPS, FedEx, USPS), **Fitness** (Personal: sporting goods, Fleet Feet)
 
    To add the ones in bold in one go, run [`supabase/scripts/add_amex_line_items.sql`](supabase/scripts/add_amex_line_items.sql) in the SQL Editor (after the migrations). It skips any you already have, under any of the accepted names, and is safe to run again. Or add them under **Settings**. Card payments are left out automatically, and "Amex Split" credits from friends reduce the meal they paid back.
-3. If you already added a purchase as an entry, the matching charge(s) are linked to it so it isn't counted twice. (Entries are only ever added by hand; the import doesn't create them.)
-4. A warning appears when a charge lands on a line that already has a typed amount that month (e.g. Netflix typed by hand *and* on the card). Choose **Don't count** or clear the typed amount.
+3. If you already added a purchase as a manual entry, the matching charge(s) are linked to it so it isn't counted twice. (Manual entries are only ever added by hand; the import doesn't create them.)
+4. A warning appears when a charge lands on a line that already has a manual entry that month (e.g. Netflix added by hand *and* on the card). Link the charge to the entry, choose **Don't count**, or delete the entry.
 5. If nothing fits, pick **+ New category…** or **+ New line item…** (right under "Uncategorized" in the dropdown) to create it on the spot. A new category needs no separate line item name; it gets one with the same name. This works on the review screen and wherever you refile charges later. To file a charge to a category without picking a line, choose **{Category} (no specific line)** at the top of that category's group.
 6. Click **Import**. Anything left uncategorized still counts as spending, under **Uncategorized** (it isn't put into an "Other" line), and shows as a "Review" banner on that Month page until you file it.

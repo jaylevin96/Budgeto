@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { PeriodPicker, type PeriodPickerProps } from "@/components/PeriodPicker";
 
 /**
- * ‹ Label › navigation used by the Dashboard, Month, Year and Entries pages. With `picker`, the label opens a
+ * ‹ Label › navigation used by the Dashboard, Month and Year pages. With `picker`, the label opens a
  * popover to jump to any period; with `onToday`, a "Today" button returns to the current one.
  */
 export function StepperNav({

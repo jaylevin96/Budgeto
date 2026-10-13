@@ -2,9 +2,11 @@ import { supabase } from "@/lib/supabase";
 import {
   fetchStructure,
   DEFAULT_STRUCTURE,
+  fetchOneOffs,
+  insertOneOffs,
   monthKey,
-  saveAmountsBulk,
   type CategoryKind,
+  type OneOffInput,
   type Recurrence,
 } from "@/lib/budget";
 
@@ -117,7 +119,7 @@ export async function parseBudgetWorkbook(data: ArrayBuffer): Promise<ParsedBudg
   return { year, sections };
 }
 
-export type ImportResult = { categoriesCreated: number; itemsCreated: number; amountsSaved: number };
+export type ImportResult = { categoriesCreated: number; itemsCreated: number; entriesSaved: number };
 
 /**
  * Create any missing categories and line items (matched case-insensitively by name),
@@ -128,7 +130,7 @@ export async function applyBudget(
   year: number | null
 ): Promise<ImportResult> {
   let { categories, items } = await fetchStructure();
-  const result: ImportResult = { categoriesCreated: 0, itemsCreated: 0, amountsSaved: 0 };
+  const result: ImportResult = { categoriesCreated: 0, itemsCreated: 0, entriesSaved: 0 };
   const key = (s: string) => s.trim().toLowerCase();
 
   const catByName = new Map(categories.map((c) => [key(c.name), c]));
@@ -169,19 +171,38 @@ export async function applyBudget(
 
   if (year !== null) {
     ({ categories, items } = await fetchStructure());
-    const itemId = new Map(items.map((i) => [itemKey(i.category_id, i.name), i.id]));
-    const rows: { line_item_id: string; month: string; amount: number }[] = [];
+    const itemByKey = new Map(items.map((i) => [itemKey(i.category_id, i.name), i]));
+    // Each filled cell becomes a manual entry named after its line item. A typed 0 only meant
+    // "nothing this month", so it's skipped.
+    const rows: OneOffInput[] = [];
     for (const s of sections) {
       const cid = catId.get(key(s.name))!;
       for (const it of s.items) {
-        const id = itemId.get(itemKey(cid, it.name));
-        if (!id) continue;
+        const item = itemByKey.get(itemKey(cid, it.name));
+        if (!item) continue;
         it.values.forEach((v, m) => {
-          if (v !== null) rows.push({ line_item_id: id, month: monthKey(year, m), amount: v });
+          if (v !== null && v > 0)
+            rows.push({
+              name: item.name,
+              amount: v,
+              month: monthKey(year, m),
+              category_id: cid,
+              line_item_id: item.id,
+              note: null,
+              repeats: it.recurrence !== "none",
+            });
         });
       }
     }
-    result.amountsSaved = (await saveAmountsBulk(rows)).length;
+    // Re-importing replaces the entries an earlier import made for those cells (same line, month and name)
+    const cell = (o: { line_item_id: string | null; month: string; name: string }) => `${o.line_item_id}|${o.month}|${key(o.name)}`;
+    const cells = new Set(rows.map(cell));
+    const stale = (await fetchOneOffs(monthKey(year, 0), monthKey(year + 1, 0))).filter((o) => cells.has(cell(o)));
+    for (let i = 0; i < stale.length; i += 200) {
+      const { error } = await supabase.from("one_offs").delete().in("id", stale.slice(i, i + 200).map((o) => o.id));
+      if (error) throw error;
+    }
+    result.entriesSaved = (await insertOneOffs(rows)).length;
   }
 
   return result;

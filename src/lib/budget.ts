@@ -24,16 +24,11 @@ export type LineItem = {
   monthly_budget: number | null;
 };
 
-export type MonthlyAmount = {
-  id: string;
-  line_item_id: string;
-  /** First of month, YYYY-MM-01 */
-  month: string;
-  amount: number;
-  note: string | null;
-};
-
-/** A bigger one-time purchase, optionally tied to a category and/or line item. */
+/**
+ * A manual entry: a named amount added by hand to a category for one month ("Rent $2,000",
+ * "Hotel $500"), optionally on one of its line items. Stored in `one_offs`. Rows from before
+ * the category was required may have neither (shown as "Needs a category").
+ */
 export type OneOff = {
   id: string;
   name: string;
@@ -43,18 +38,14 @@ export type OneOff = {
   category_id: string | null;
   line_item_id: string | null;
   note: string | null;
+  /** Offered for copying into the next month */
+  repeats: boolean;
 };
 
 export const KIND_LABEL: Record<CategoryKind, string> = {
   income: "Income",
   expense: "Spending",
   savings: "Savings",
-};
-
-export const RECURRENCE_LABEL: Record<Recurrence, string> = {
-  fixed: "Fixed monthly",
-  variable: "Monthly, amount varies",
-  none: "Occasional",
 };
 
 export const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -202,32 +193,11 @@ export async function createLineItem(
   return { category, item: { ...item, default_amount: num(item.default_amount), monthly_budget: num(item.monthly_budget) } };
 }
 
-const AMOUNT_COLUMNS = "id, line_item_id, month, amount, note";
-const ONE_OFF_COLUMNS = "id, name, amount, month, category_id, line_item_id, note";
+const ONE_OFF_COLUMNS = "id, name, amount, month, category_id, line_item_id, note, repeats";
 
-const toAmount = (a: MonthlyAmount): MonthlyAmount => ({ ...a, amount: Number(a.amount) });
 const toOneOff = (o: OneOff): OneOff => ({ ...o, amount: Number(o.amount) });
 
-/** Amounts for months in [fromKey, toKeyExclusive) */
-export async function fetchAmounts(fromKey: string, toKeyExclusive: string): Promise<MonthlyAmount[]> {
-  const out: MonthlyAmount[] = [];
-  const pageSize = 1000;
-  for (let from = 0; ; from += pageSize) {
-    const { data, error } = await supabase
-      .from("monthly_amounts")
-      .select(AMOUNT_COLUMNS)
-      .gte("month", fromKey)
-      .lt("month", toKeyExclusive)
-      .order("month")
-      .range(from, from + pageSize - 1);
-    if (error) throw error;
-    out.push(...(data as MonthlyAmount[]).map(toAmount));
-    if (data.length < pageSize) break;
-  }
-  return out;
-}
-
-/** One-offs for months in [fromKey, toKeyExclusive) */
+/** Manual entries for months in [fromKey, toKeyExclusive) */
 export async function fetchOneOffs(fromKey: string, toKeyExclusive: string): Promise<OneOff[]> {
   const { data, error } = await supabase
     .from("one_offs")
@@ -238,49 +208,6 @@ export async function fetchOneOffs(fromKey: string, toKeyExclusive: string): Pro
     .order("created_at");
   if (error) throw error;
   return (data as OneOff[]).map(toOneOff);
-}
-
-/** Insert or update a single cell. amount null deletes it (back to "not entered"). */
-export async function saveAmount(lineItemId: string, month: string, amount: number | null): Promise<MonthlyAmount | null> {
-  if (amount === null) {
-    const { error } = await supabase.from("monthly_amounts").delete().eq("line_item_id", lineItemId).eq("month", month);
-    if (error) throw error;
-    return null;
-  }
-  const { data, error } = await supabase
-    .from("monthly_amounts")
-    .upsert({ line_item_id: lineItemId, month, amount }, { onConflict: "line_item_id,month" })
-    .select(AMOUNT_COLUMNS)
-    .single();
-  if (error) throw error;
-  return toAmount(data as MonthlyAmount);
-}
-
-/** Set or clear the note on an entered cell. */
-export async function saveNote(lineItemId: string, month: string, note: string | null): Promise<MonthlyAmount> {
-  const { data, error } = await supabase
-    .from("monthly_amounts")
-    .update({ note: note?.trim() || null })
-    .eq("line_item_id", lineItemId)
-    .eq("month", month)
-    .select(AMOUNT_COLUMNS)
-    .single();
-  if (error) throw error;
-  return toAmount(data as MonthlyAmount);
-}
-
-export async function saveAmountsBulk(rows: { line_item_id: string; month: string; amount: number }[]): Promise<MonthlyAmount[]> {
-  if (!rows.length) return [];
-  const out: MonthlyAmount[] = [];
-  for (let i = 0; i < rows.length; i += 500) {
-    const { data, error } = await supabase
-      .from("monthly_amounts")
-      .upsert(rows.slice(i, i + 500), { onConflict: "line_item_id,month" })
-      .select(AMOUNT_COLUMNS);
-    if (error) throw error;
-    out.push(...(data as MonthlyAmount[]).map(toAmount));
-  }
-  return out;
 }
 
 export type OneOffInput = Omit<OneOff, "id">;
@@ -295,25 +222,24 @@ export async function saveOneOff(id: string | null, input: OneOffInput): Promise
   return toOneOff(data as OneOff);
 }
 
+/** Insert several manual entries at once (e.g. copying repeating ones into a new month). */
+export async function insertOneOffs(rows: OneOffInput[]): Promise<OneOff[]> {
+  if (!rows.length) return [];
+  const out: OneOff[] = [];
+  for (let i = 0; i < rows.length; i += 500) {
+    const { data, error } = await supabase.from("one_offs").insert(rows.slice(i, i + 500)).select(ONE_OFF_COLUMNS);
+    if (error) throw error;
+    out.push(...(data as OneOff[]).map(toOneOff));
+  }
+  return out;
+}
+
 export async function deleteOneOff(id: string): Promise<void> {
   const { error } = await supabase.from("one_offs").delete().eq("id", id);
   if (error) throw error;
 }
 
 // ---------- Rollups ----------
-
-/** lineItemId → monthKey → amount (typed cell values only) */
-export type AmountIndex = Map<string, Map<string, number>>;
-
-export function indexAmounts(amounts: MonthlyAmount[]): AmountIndex {
-  const idx: AmountIndex = new Map();
-  for (const a of amounts) {
-    let m = idx.get(a.line_item_id);
-    if (!m) idx.set(a.line_item_id, (m = new Map()));
-    m.set(a.month, a.amount);
-  }
-  return idx;
-}
 
 type MonthBuckets<T> = Map<string, Map<string, T[]>>;
 
@@ -326,19 +252,15 @@ function bucket<T>(map: MonthBuckets<T>, key: string, month: string, value: T) {
 }
 
 /**
- * Everything needed to total a month: typed cells, entries (one-offs) and card charges.
- * Entries and card charges follow the same rule: tied to a line item they add to that item;
- * tied only to a category they form that category's "Entries" row; untied ones are
- * "Uncategorized" spending. Card charges that are excluded or covered by an entry don't
- * count on their own.
+ * Everything needed to total a month: manual entries (one-offs) and card charges. Both follow
+ * the same rule: on a line item they add to that item; on a category only they form that
+ * category's "Other" row; with neither they are "Uncategorized" spending (unfiled card
+ * charges, or manual entries from before a category was required). Card charges that are
+ * excluded or covered by a manual entry don't count on their own.
  */
 export type Ledger = {
   categories: Category[];
   items: LineItem[];
-  /** Typed cell values (base amounts) */
-  idx: AmountIndex;
-  /** lineItemId → month → note */
-  notes: Map<string, Map<string, string>>;
   oneOffs: OneOff[];
   oneOffsByItem: MonthBuckets<OneOff>;
   /** Category-only one-offs (no line item) */
@@ -359,19 +281,11 @@ export type Ledger = {
 export function buildLedger(
   categories: Category[],
   items: LineItem[],
-  amounts: MonthlyAmount[],
   oneOffs: OneOff[],
   transactions: Transaction[] = []
 ): Ledger {
   const itemIds = new Set(items.map((i) => i.id));
   const catIds = new Set(categories.map((c) => c.id));
-  const notes = new Map<string, Map<string, string>>();
-  for (const a of amounts) {
-    if (!a.note) continue;
-    let m = notes.get(a.line_item_id);
-    if (!m) notes.set(a.line_item_id, (m = new Map()));
-    m.set(a.month, a.note);
-  }
   const oneOffsByItem: MonthBuckets<OneOff> = new Map();
   const oneOffsByCategory: MonthBuckets<OneOff> = new Map();
   const uncategorized = new Map<string, OneOff[]>();
@@ -392,8 +306,6 @@ export function buildLedger(
   return {
     categories,
     items,
-    idx: indexAmounts(amounts),
-    notes,
     oneOffs,
     oneOffsByItem,
     oneOffsByCategory,
@@ -431,18 +343,17 @@ export function uncategorizedCard(L: Ledger, month: string): Transaction[] {
 
 const sumCard = (list: Transaction[] | undefined) => sumMoney((list ?? []).map((t) => t.amount));
 
-/** Typed amount + linked one-offs + card charges; undefined when none exist. */
+/** Manual entries + card charges on a line item; undefined when there are none. */
 export function itemMonthTotal(L: Ledger, itemId: string, month: string): number | undefined {
-  const base = L.idx.get(itemId)?.get(month);
   const linked = L.oneOffsByItem.get(itemId)?.get(month);
   const card = L.cardByItem.get(itemId)?.get(month);
-  if (base === undefined && !linked?.length && !card?.length) return undefined;
-  return sumMoney([base ?? 0, sumOneOffs(linked), sumCard(card)]);
+  if (!linked?.length && !card?.length) return undefined;
+  return sumMoney([sumOneOffs(linked), sumCard(card)]);
 }
 
-/** Whether an item has anything this month: typed, or card charges (which count as entered) */
+/** Whether a line item has anything this month (a manual entry or a card charge) */
 export function itemEntered(L: Ledger, itemId: string, month: string): boolean {
-  return L.idx.get(itemId)?.has(month) === true || itemCard(L, itemId, month).length > 0;
+  return itemMonthTotal(L, itemId, month) !== undefined;
 }
 
 export function totalForCategoryMonth(L: Ledger, categoryId: string, month: string): number {
@@ -453,7 +364,7 @@ export function totalForCategoryMonth(L: Ledger, categoryId: string, month: stri
   ]);
 }
 
-/** The category's own "Entries" row: category-only entries plus card charges filed to it */
+/** The category's "Other" row: manual entries and card charges on the category but no line item */
 export function categoryEntriesTotal(L: Ledger, categoryId: string, month: string): number {
   return sumMoney([sumOneOffs(categoryOneOffs(L, categoryId, month)), sumCard(categoryCard(L, categoryId, month))]);
 }
@@ -462,7 +373,7 @@ export function categoryHasEntries(L: Ledger, categoryId: string, month: string)
   return categoryOneOffs(L, categoryId, month).length > 0 || categoryCard(L, categoryId, month).length > 0;
 }
 
-/** Whether a category has anything (typed, entries or card charges) in a month */
+/** Whether a category has anything (manual entries or card charges) in a month */
 export function categoryHasData(L: Ledger, categoryId: string, month: string): boolean {
   return (
     L.items.some((i) => i.category_id === categoryId && itemMonthTotal(L, i.id, month) !== undefined) ||
@@ -470,7 +381,7 @@ export function categoryHasData(L: Ledger, categoryId: string, month: string): b
   );
 }
 
-/** Untied one-offs plus unfiled card charges */
+/** Manual entries without a category plus unfiled card charges */
 export function uncategorizedTotal(L: Ledger, month: string): number {
   return sumMoney([sumOneOffs(L.uncategorized.get(month)), sumCard(L.cardUncategorized.get(month))]);
 }
@@ -486,9 +397,9 @@ export type MonthSummary = {
   savings: number;
   /** income − spending − savings: what's left over */
   net: number;
-  /** Count of entered cells this month: typed, or with card charges (for "x of y entered") */
+  /** Line items with something this month (for "x of y entered") */
   entered: number;
-  /** Total of all one-offs this month */
+  /** Total of all manual entries this month */
   oneOffs: number;
   /** Anything at all recorded this month */
   hasData: boolean;
@@ -528,48 +439,6 @@ export function summarizeMonth(L: Ledger, month: string): MonthSummary {
   };
 }
 
-/** Average of the most recent `n` entered months before `month` (for anomaly hints). */
-export function trailingAverage(itemId: string, month: string, idx: AmountIndex, n = 3, lookback = 12): number | null {
-  const m = idx.get(itemId);
-  if (!m) return null;
-  const vals: number[] = [];
-  for (let k = 1; k <= lookback && vals.length < n; k++) {
-    const v = m.get(addMonths(month, -k));
-    if (v !== undefined && v > 0) vals.push(v);
-  }
-  if (!vals.length) return null;
-  return vals.reduce((s, v) => s + v, 0) / vals.length;
-}
-
-/** Most recent entered amount before `month` */
-export function lastAmount(itemId: string, month: string, idx: AmountIndex, lookback = 12): number | null {
-  const m = idx.get(itemId);
-  if (!m) return null;
-  for (let k = 1; k <= lookback; k++) {
-    const v = m.get(addMonths(month, -k));
-    if (v !== undefined) return v;
-  }
-  return null;
-}
-
-/** What the Month page pre-fills for an item, or null for no suggestion. */
-export function suggestedAmount(item: LineItem, month: string, idx: AmountIndex): number | null {
-  if (item.recurrence === "fixed") return item.default_amount ?? lastAmount(item.id, month, idx, 3);
-  // Only suggest from recent history; a value from many months back is probably stale
-  if (item.recurrence === "variable") return lastAmount(item.id, month, idx, 3) ?? item.default_amount;
-  return null;
-}
-
-/** Flag typed amounts far from the item's recent average (one-offs are excluded on purpose). */
-export function anomalyHint(item: LineItem, month: string, value: number, idx: AmountIndex): string | null {
-  const avg = trailingAverage(item.id, month, idx);
-  if (avg === null || avg < 20) return null;
-  if (value > avg * 2 || value < avg * 0.5) {
-    return `Usually about ${formatMoney(avg)}`;
-  }
-  return null;
-}
-
 /** Budget status for display: tone escalates at 90% and over 100%. */
 export function budgetStatus(spent: number, budget: number): { pct: number; tone: "ok" | "near" | "over"; label: string } {
   const pct = budget > 0 ? spent / budget : spent > 0 ? Infinity : 0;
@@ -579,13 +448,31 @@ export function budgetStatus(spent: number, budget: number): { pct: number; tone
   return { pct, tone, label };
 }
 
-/** "Vacations › Plane fare", "Personal", or "Uncategorized" */
+/** "Vacations › Plane fare", "Personal", or "Needs a category" */
 export function oneOffTarget(o: OneOff, categories: Category[], items: LineItem[]): string {
   const item = o.line_item_id ? items.find((i) => i.id === o.line_item_id) : undefined;
   const cat = categories.find((c) => c.id === (item?.category_id ?? o.category_id));
   if (item && cat) return `${cat.name} › ${item.name}`;
   if (cat) return cat.name;
-  return "Uncategorized";
+  return "Needs a category";
+}
+
+/**
+ * Last month's repeating manual entries that this month doesn't have yet (same name and
+ * place). Skips line items already paid by card this month so a bill isn't counted twice.
+ */
+export function repeatingToCopy(L: Ledger, month: string): OneOff[] {
+  const prev = addMonths(month, -1);
+  const place = (o: OneOff) => `${o.line_item_id ?? ""}|${o.category_id ?? ""}|${o.name.trim().toLowerCase()}`;
+  const have = new Set(L.oneOffs.filter((o) => o.month === month).map(place));
+  return L.oneOffs.filter(
+    (o) =>
+      o.month === prev &&
+      o.repeats &&
+      o.category_id !== null &&
+      !have.has(place(o)) &&
+      !(o.line_item_id && itemCard(L, o.line_item_id, month).length > 0)
+  );
 }
 
 // ---------- Default structure (from the 2026 spreadsheet) ----------

@@ -18,11 +18,11 @@ type Cell = string | number | null;
 /**
  * Download a year as .xlsx in the same layout as the original budget spreadsheet:
  * one section per category (SECTION | JAN … DEC | YEAR, rows, Total), then TOTALS.
- * Line-item cells include their linked one-offs and card charges; category-only one-offs appear
- * as rows in their section, and unfiled card charges in the Uncategorized section. Further
- * sheets list every one-off and every card charge. The file parses with the importer
- * (one-offs come back as regular line items), so it is meant for backup or a fresh account,
- * not for re-importing into the same account (linked one-offs would be counted twice).
+ * Line-item cells are their manual entries plus card charges; a category's "Other" manual
+ * entries appear as rows in their section, and unfiled card charges in the Uncategorized
+ * section. Further sheets list every manual entry and every card charge. The file parses with
+ * the importer, so it is meant for backup or a fresh account, not for re-importing into the
+ * same account (card charges in the cells would be counted twice).
  */
 export async function exportYear(year: number, L: Ledger): Promise<void> {
   const XLSX = await import("xlsx");
@@ -46,7 +46,7 @@ export async function exportYear(year: number, L: Ledger): Promise<void> {
       name: item.name,
       values: months.map((m) => itemMonthTotal(L, item.id, m) ?? null),
     }));
-    // Category-only one-offs: one row per one-off name
+    // The category's "Other" manual entries: one row per name
     const catOneOffs = months.flatMap((m) => categoryOneOffs(L, cat.id, m));
     for (const [name, list] of groupByName(catOneOffs)) {
       lines.push({ name, values: months.map((m) => sumOrNull(list.filter((o) => o.month === m))) });
@@ -101,7 +101,7 @@ export async function exportYear(year: number, L: Ledger): Promise<void> {
       formatMonth(o.month, "short"),
       o.name,
       o.amount,
-      catName.get(item?.category_id ?? o.category_id ?? "") ?? "Uncategorized",
+      catName.get(item?.category_id ?? o.category_id ?? "") ?? "Needs a category",
       item ? itemName.get(item.id) ?? "" : "",
       o.note ?? "",
     ]);
@@ -116,7 +116,7 @@ export async function exportYear(year: number, L: Ledger): Promise<void> {
     const countedAs = t.excluded
       ? "Not counted"
       : t.one_off_id
-        ? `Entry: ${oneOffName.get(t.one_off_id) ?? "(other month)"}`
+        ? `Manual entry: ${oneOffName.get(t.one_off_id) ?? "(other month)"}`
         : item
           ? `${catName.get(item.category_id) ?? ""} › ${item.name}`
           : t.category_id && catName.has(t.category_id)
@@ -130,7 +130,7 @@ export async function exportYear(year: number, L: Ledger): Promise<void> {
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, budgetSheet, "PERSONAL BUDGET");
-  XLSX.utils.book_append_sheet(wb, oneOffSheet, "Entries");
+  XLSX.utils.book_append_sheet(wb, oneOffSheet, "Manual entries");
   if (cardRows.length > 1) XLSX.utils.book_append_sheet(wb, cardSheet, "Card charges");
   XLSX.writeFile(wb, `Budgeto_${year}.xlsx`);
 }
