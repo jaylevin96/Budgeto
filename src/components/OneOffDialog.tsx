@@ -70,6 +70,7 @@ export function OneOffDialog({
   const [lineItemId, setLineItemId] = useState(oneOff?.line_item_id ?? defaults.line_item_id ?? "");
   const [note, setNote] = useState(oneOff?.note ?? "");
   const [repeat, setRepeat] = useState(startRecurring);
+  const [varies, setVaries] = useState(false);
   const [scope, setScope] = useState<Scope>("this");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,8 +120,8 @@ export function OneOffDialog({
     }
     if (repeat) {
       return run(async () => {
-        if (oneOff) await makeRecurring(oneOff, fields, month);
-        else await createRecurring(fields, month);
+        if (oneOff) await makeRecurring(oneOff, fields, month, varies);
+        else await createRecurring(fields, month, varies);
         onRecurringChanged();
       });
     }
@@ -282,6 +283,12 @@ export function OneOffDialog({
                 <legend className="flex items-center gap-1.5 px-1 font-medium">
                   <Repeat className="h-3.5 w-3.5" aria-hidden /> Apply changes to
                 </legend>
+                {series.amount_varies && (
+                  <p className="text-xs text-[var(--color-muted-foreground)]">
+                    The amount changes each month, so the new amount only applies to {monthLabel}; name, category, line
+                    item and note carry over to the months you pick.
+                  </p>
+                )}
                 {(
                   [
                     ["this", `${monthLabel} only`],
@@ -296,23 +303,44 @@ export function OneOffDialog({
                 ))}
               </fieldset>
             ) : (
-              <label
+              <div
                 className={cn(
-                  "flex items-start gap-2 rounded-md border p-3 text-sm",
+                  "space-y-2 rounded-md border p-3 text-sm",
                   repeat ? "border-[var(--color-primary)]" : "border-[var(--color-border)]"
                 )}
               >
-                <input type="checkbox" className="mt-0.5 h-4 w-4" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} />
-                <span>
-                  <span className="flex items-center gap-1.5 font-medium">
-                    <Repeat className="h-3.5 w-3.5" aria-hidden /> Repeat every month from {formatMonth(month, "short")}
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" className="mt-0.5 h-4 w-4" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} />
+                  <span>
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <Repeat className="h-3.5 w-3.5" aria-hidden /> Repeat every month from {formatMonth(month, "short")}
+                    </span>
+                    <span className="block text-xs text-[var(--color-muted-foreground)]">
+                      Rent, wages, utilities, subscriptions. Manage it under Recurring on the Month page.
+                    </span>
                   </span>
-                  <span className="block text-xs text-[var(--color-muted-foreground)]">
-                    Rent, wages, subscriptions. It's added automatically each month until you stop it; manage it under
-                    Recurring on the Month page.
-                  </span>
-                </span>
-              </label>
+                </label>
+                {repeat && (
+                  <div className="space-y-1.5 pl-6">
+                    <label className="flex items-start gap-2">
+                      <input type="radio" name="oo-varies" className="mt-0.5 h-4 w-4" checked={!varies} onChange={() => setVaries(false)} />
+                      <span>
+                        Same amount every month
+                        <span className="block text-xs text-[var(--color-muted-foreground)]">Filled in automatically (rent, wages).</span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2">
+                      <input type="radio" name="oo-varies" className="mt-0.5 h-4 w-4" checked={varies} onChange={() => setVaries(true)} />
+                      <span>
+                        Amount changes each month
+                        <span className="block text-xs text-[var(--color-muted-foreground)]">
+                          Each month asks you for the amount, with last month's as a hint (utilities, childcare).
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                )}
+              </div>
             )}
             <FormError>{error}</FormError>
             <DialogFooter className="gap-2">

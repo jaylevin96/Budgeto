@@ -21,8 +21,10 @@ import {
   type OneOff,
 } from "@/lib/budget";
 import {
+  enterAmount,
   removeRecurring,
   restartRecurring,
+  setAmountVaries,
   stopRecurring,
   unskipRecurring,
   updateRecurring,
@@ -45,6 +47,7 @@ export function RecurringPanel({
   items,
   onAdd,
   onChanged,
+  onAmountEntered,
 }: {
   month: string;
   recurring: RecurringEntry[];
@@ -54,6 +57,8 @@ export function RecurringPanel({
   items: LineItem[];
   onAdd: () => void;
   onChanged: () => void;
+  /** A varying entry's amount was entered for a month */
+  onAmountEntered: (saved: OneOff) => void;
 }) {
   const [editing, setEditing] = useState<RecurringEntry | null>(null);
   const [showStopped, setShowStopped] = useState(false);
@@ -70,24 +75,35 @@ export function RecurringPanel({
     [catById.get(r.category_id)?.name, items.find((i) => i.id === r.line_item_id)?.name].filter(Boolean).join(" › ");
   const occurrence = (r: RecurringEntry, m: string) => oneOffs.find((o) => o.recurring_id === r.id && o.month === m);
 
+  /** Last known amount for a varying entry: last month's, else the template's */
+  const hintFor = (r: RecurringEntry) => occurrence(r, prevMonth)?.amount ?? r.amount;
+  // Varying entries with no amount yet for this (past or current) month: asked for separately
+  const needsAmount = isFuture
+    ? []
+    : active.filter((r) => r.amount_varies && !r.skip_months.includes(month) && !occurrence(r, month));
+
   /** What this entry brings into the month, and how that compares with last month */
-  const lines = active.map((r) => {
+  const lines = active.filter((r) => !needsAmount.includes(r)).map((r) => {
     const skipped = r.skip_months.includes(month);
     const occ = occurrence(r, month);
     // Past and current months have a real entry; future months show what will come in
-    const amount = skipped ? 0 : (occ?.amount ?? (isFuture ? r.amount : 0));
+    // (a varying amount isn't known yet, so it isn't counted)
+    const estimate = isFuture && r.amount_varies && !skipped;
+    const amount = skipped || estimate ? 0 : (occ?.amount ?? (isFuture ? r.amount : 0));
     const prev = occurrence(r, prevMonth)?.amount;
     const notes: string[] = [];
-    if (skipped) notes.push(`skipped in ${formatMonth(month, "short")}`);
+    if (estimate) notes.push(`amount varies, last ${formatMoney(hintFor(r), true)}`);
+    else if (skipped) notes.push(`skipped in ${formatMonth(month, "short")}`);
     else if (r.start_month === month) notes.push("new this month");
-    else if (prev === undefined && r.start_month <= prevMonth) notes.push(`skipped in ${formatMonth(prevMonth, "short")}`);
+    else if (prev === undefined && r.start_month <= prevMonth)
+      notes.push(r.amount_varies ? `nothing entered for ${formatMonth(prevMonth, "short")}` : `skipped in ${formatMonth(prevMonth, "short")}`);
     else if (prev !== undefined && prev !== amount) {
       const d = amount - prev;
       notes.push(`${d > 0 ? "up" : "down"} ${formatMoney(Math.abs(d), true)} from ${formatMoney(prev, true)} in ${formatMonth(prevMonth, "short")}`);
     }
-    if (occ && occ.amount !== r.amount && !skipped) notes.push(`usually ${formatMoney(r.amount, true)}`);
+    if (occ && occ.amount !== r.amount && !skipped && !r.amount_varies) notes.push(`usually ${formatMoney(r.amount, true)}`);
     if (r.end_month === month) notes.push(`last month: stops after ${formatMonth(month, "short")}`);
-    return { r, amount, skipped, notes, kind: catById.get(r.category_id)?.kind ?? ("expense" as CategoryKind) };
+    return { r, amount, skipped, estimate, notes, kind: catById.get(r.category_id)?.kind ?? ("expense" as CategoryKind) };
   });
   const groups = (["income", "expense", "savings"] as const)
     .map((kind) => ({ kind, lines: lines.filter((l) => l.kind === kind) }))
@@ -111,7 +127,8 @@ export function RecurringPanel({
   }
 
   const kindOf = (r: RecurringEntry): CategoryKind => catById.get(r.category_id)?.kind ?? "expense";
-  const row = (r: RecurringEntry, amount: number, notes: string[], muted = false) => (
+  /** `amount` null = not known yet (a varying amount in a future month) */
+  const row = (r: RecurringEntry, amount: number | null, notes: string[], muted = false) => (
     <li key={r.id}>
       <button
         type="button"
@@ -138,7 +155,7 @@ export function RecurringPanel({
             muted ? "text-[var(--color-muted-foreground)] line-through" : tone(kindOf(r))
           )}
         >
-          {signed(kindOf(r), muted ? r.amount : amount, true)}
+          {amount === null ? "?" : signed(kindOf(r), muted ? r.amount : amount, true)}
         </span>
       </button>
     </li>
@@ -151,9 +168,10 @@ export function RecurringPanel({
           <h2 className="flex items-center gap-2 font-semibold">
             <Repeat className="h-4 w-4" aria-hidden /> Recurring
           </h2>
-          {lines.length > 0 && (
+          {lines.length + needsAmount.length > 0 && (
             <span className="text-xs text-[var(--color-muted-foreground)]">
               {isFuture ? `Scheduled for ${formatMonth(month, "short")}` : `Added to ${formatMonth(month, "short")}`}
+              {needsAmount.length > 0 && ` · ${needsAmount.length} need an amount`}
             </span>
           )}
         </div>
@@ -187,6 +205,38 @@ export function RecurringPanel({
           Nothing recurring yet. Add rent, wages or subscriptions once and they're filled in every month.
         </p>
       )}
+      {needsAmount.length > 0 && (
+        <div className="border-b border-[var(--color-border)] bg-[var(--color-warning)]/5">
+          <p className="px-4 pt-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-warning)]">
+            Needs an amount ({needsAmount.length})
+          </p>
+          <p className="px-4 text-xs text-[var(--color-muted-foreground)]">
+            These come every month but the amount changes. Not counted until you enter it.
+          </p>
+          <ul className="divide-y divide-[var(--color-border)]">
+            {needsAmount.map((r) => (
+              <NeedsAmountRow
+                key={r.id}
+                entry={r}
+                month={month}
+                where={where(r)}
+                hint={hintFor(r)}
+                onEntered={onAmountEntered}
+                onSkip={async () => {
+                  setError(null);
+                  try {
+                    await removeRecurring(r, "this", month);
+                    onChanged();
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Could not skip");
+                  }
+                }}
+                onManage={() => setEditing(r)}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
       {groups.map((g) => (
         <div key={g.kind} className="border-b border-[var(--color-border)] last:border-b-0">
           <div className="flex items-baseline justify-between bg-[var(--color-muted)]/50 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--color-muted-foreground)]">
@@ -196,7 +246,9 @@ export function RecurringPanel({
             <span className={cn("tabular-nums", tone(g.kind))}>{signed(g.kind, g.total, true)}</span>
           </div>
           <ul className="divide-y divide-[var(--color-border)]">
-            {[...g.lines].sort((a, b) => b.amount - a.amount).map((l) => row(l.r, l.amount, l.notes, l.skipped))}
+            {[...g.lines]
+              .sort((a, b) => b.amount - a.amount)
+              .map((l) => row(l.r, l.estimate ? null : l.amount, l.notes, l.skipped))}
           </ul>
         </div>
       ))}
@@ -276,6 +328,91 @@ export function RecurringPanel({
   );
 }
 
+/** A varying recurring entry with no amount for the month yet: type it (or use last month's) and save. */
+function NeedsAmountRow({
+  entry,
+  month,
+  where,
+  hint,
+  onEntered,
+  onSkip,
+  onManage,
+}: {
+  entry: RecurringEntry;
+  month: string;
+  where: string;
+  hint: number;
+  onEntered: (saved: OneOff) => void;
+  onSkip: () => void;
+  onManage: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save(value: string) {
+    const amount = parseAmount(value);
+    if (amount === null || Number.isNaN(amount)) return setError("Enter an amount like 85 or 85.50");
+    setBusy(true);
+    setError(null);
+    try {
+      onEntered(await enterAmount(entry, month, amount));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 text-sm">
+      <button type="button" onClick={onManage} className="min-w-0 flex-1 basis-40 text-left hover:underline">
+        <span className="block truncate font-medium">{entry.name}</span>
+        <span className="block truncate text-xs text-[var(--color-muted-foreground)]">
+          {where} · last {formatMoney(hint, true)}
+        </span>
+      </button>
+      <form
+        className="flex items-center gap-1.5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save(text);
+        }}
+      >
+        <Input
+          className="h-8 w-24 text-right tabular-nums"
+          inputMode="decimal"
+          placeholder={String(hint)}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          aria-label={`${entry.name} amount for ${formatMonth(month)}`}
+        />
+        <Button type="submit" size="sm" className="h-8" disabled={busy || !text.trim()}>
+          Save
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8"
+          disabled={busy}
+          onClick={() => save(String(hint))}
+          title={`Use last month's ${formatMoney(hint, true)}`}
+        >
+          Use {formatMoney(hint)}
+        </Button>
+        <Button type="button" variant="ghost" size="sm" className="h-8" disabled={busy} onClick={onSkip}>
+          Skip
+        </Button>
+      </form>
+      {error && (
+        <div className="w-full">
+          <FormError>{error}</FormError>
+        </div>
+      )}
+    </li>
+  );
+}
+
 /** Change, skip, stop or delete a recurring entry, as of the month being viewed. */
 function RecurringDialog({
   entry,
@@ -298,6 +435,7 @@ function RecurringDialog({
   const [lineItemId, setLineItemId] = useState(entry.line_item_id ?? "");
   const [note, setNote] = useState(entry.note ?? "");
   const [scope, setScope] = useState<"future" | "all">("future");
+  const [varies, setVaries] = useState(entry.amount_varies);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -326,9 +464,15 @@ function RecurringDialog({
     if (!name.trim()) return setError("Give it a name, e.g. Rent");
     const amount = parseAmount(amountText);
     if (amount === null || Number.isNaN(amount)) return setError("Enter an amount like 2000 or 15.99");
-    run(() =>
-      updateRecurring(entry, { name, amount, category_id: categoryId, line_item_id: lineItemId || null, note: note || null }, scope, from)
-    );
+    run(async () => {
+      await updateRecurring(
+        { ...entry, amount_varies: varies },
+        { name, amount, category_id: categoryId, line_item_id: lineItemId || null, note: note || null },
+        scope,
+        from
+      );
+      if (varies !== entry.amount_varies) await setAmountVaries(entry, varies);
+    });
   }
 
   return (
@@ -351,7 +495,7 @@ function RecurringDialog({
               <Input id="re-name" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="re-amount">Amount</Label>
+              <Label htmlFor="re-amount">{varies ? "Usual amount" : "Amount"}</Label>
               <Input id="re-amount" inputMode="decimal" value={amountText} onChange={(e) => setAmountText(e.target.value)} />
             </div>
           </div>
@@ -392,7 +536,23 @@ function RecurringDialog({
             <Input id="re-note" value={note} onChange={(e) => setNote(e.target.value)} />
           </div>
           <fieldset className="space-y-1.5 rounded-md border border-[var(--color-border)] p-3 text-sm">
+            <legend className="px-1 font-medium">Amount</legend>
+            <label className="flex items-center gap-2">
+              <input type="radio" name="re-varies" className="h-4 w-4" checked={!varies} onChange={() => setVaries(false)} />
+              Same every month (filled in automatically)
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="radio" name="re-varies" className="h-4 w-4" checked={varies} onChange={() => setVaries(true)} />
+              Changes each month (asks for it each month)
+            </label>
+          </fieldset>
+          <fieldset className="space-y-1.5 rounded-md border border-[var(--color-border)] p-3 text-sm">
             <legend className="px-1 font-medium">Apply changes to</legend>
+            {varies && (
+              <p className="text-xs text-[var(--color-muted-foreground)]">
+                Each month keeps the amount entered for it; name, category, line item and note carry over.
+              </p>
+            )}
             <label className="flex items-center gap-2">
               <input type="radio" name="re-scope" className="h-4 w-4" checked={scope === "future"} onChange={() => setScope("future")} />
               {fromLabel} and later (earlier months keep their amounts)

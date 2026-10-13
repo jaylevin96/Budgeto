@@ -179,7 +179,7 @@ export async function applyBudget(
     // Each filled cell becomes a manual entry named after its line item. A typed 0 only meant
     // "nothing this month", so it's skipped. Rows filled most months become a recurring entry
     // (open-ended if they reach last month, so later months fill themselves in).
-    type Planned = { item: LineItem; cid: string; recurring: boolean; cells: { month: string; amount: number }[] };
+    type Planned = { item: LineItem; cid: string; recurring: boolean; varies: boolean; cells: { month: string; amount: number }[] };
     const planned: Planned[] = [];
     for (const s of sections) {
       const cid = catId.get(key(s.name))!;
@@ -187,7 +187,7 @@ export async function applyBudget(
         const item = itemByKey.get(itemKey(cid, it.name));
         if (!item) continue;
         const cells = it.values.flatMap((v, m) => (v !== null && v > 0 ? [{ month: monthKey(year, m), amount: v }] : []));
-        if (cells.length) planned.push({ item, cid, recurring: it.recurrence !== "none", cells });
+        if (cells.length) planned.push({ item, cid, recurring: it.recurrence !== "none", varies: it.recurrence === "variable", cells });
       }
     }
 
@@ -230,6 +230,7 @@ export async function applyBudget(
             start_month: first,
             end_month: last >= lastMonth ? null : last,
             skip_months: skips,
+            amount_varies: p.varies,
           })
           .select("id")
           .single();

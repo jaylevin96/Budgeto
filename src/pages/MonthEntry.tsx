@@ -152,6 +152,7 @@ export function MonthEntry() {
             items={items}
             onAdd={() => setEditingOneOff({ oneOff: null, startRecurring: true })}
             onChanged={refresh}
+            onAmountEntered={(saved) => applyOneOff(saved.id, saved)}
           />
 
           <CardActivity
