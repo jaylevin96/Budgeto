@@ -231,3 +231,14 @@ export async function unskipRecurring(entry: RecurringEntry, month: string): Pro
   if (error) throw error;
   await ensureOccurrences([next]);
 }
+
+/**
+ * Varying recurring entries that still need an amount for `month` (in range, not skipped,
+ * nothing entered). Future months never need one yet.
+ */
+export function needingAmount(recurring: RecurringEntry[], oneOffs: OneOff[], month: string): RecurringEntry[] {
+  if (month > currentMonthKey()) return [];
+  return recurring.filter(
+    (r) => r.amount_varies && activeIn(r, month) && !oneOffs.some((o) => o.recurring_id === r.id && o.month === month)
+  );
+}

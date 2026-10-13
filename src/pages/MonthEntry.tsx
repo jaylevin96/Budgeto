@@ -11,6 +11,7 @@ import { EmptyBudget } from "@/components/EmptyBudget";
 import { OneOffDialog } from "@/components/OneOffDialog";
 import { CardChargesRow, OneOffList } from "@/components/OneOffList";
 import { RecurringPanel } from "@/components/RecurringPanel";
+import { VaryingAmountsCard } from "@/components/VaryingAmountsCard";
 import { StepperNav } from "@/components/StepperNav";
 import { SummaryTiles } from "@/components/SummaryTiles";
 import { useBudget } from "@/hooks/useBudget";
@@ -57,7 +58,7 @@ export function MonthEntry() {
   const navigate = useNavigate();
   const month = monthKeyFromSlug(params.month) ?? currentMonthKey();
 
-  // Load last month too, for "vs last month"
+  // Load a few months back too, for "vs last month" and recent amounts of varying recurring entries
   const {
     categories,
     items,
@@ -72,7 +73,7 @@ export function MonthEntry() {
     refresh,
     applyTransactions,
     applyCreated,
-  } = useBudget(addMonths(month, -1), addMonths(month, 1));
+  } = useBudget(addMonths(month, -3), addMonths(month, 1));
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [editingOneOff, setEditingOneOff] = useState<EditingOneOff>(null);
   // Which card charges the dialog shows (a snapshot, so a reassigned charge stays in view)
@@ -144,6 +145,16 @@ export function MonthEntry() {
         <p className="text-[var(--color-muted-foreground)]">Loading…</p>
       ) : (
         <>
+          <VaryingAmountsCard
+            month={month}
+            recurring={recurring}
+            oneOffs={oneOffs}
+            categories={categories}
+            items={items}
+            onEntered={(saved) => applyOneOff(saved.id, saved)}
+            onSkipped={refresh}
+          />
+
           <SummaryTiles current={summary} previous={prevSummary} compareLabel="vs last month" />
 
           {needsCategory.length > 0 && (
@@ -176,7 +187,6 @@ export function MonthEntry() {
                 items={items}
                 onAdd={() => setEditingOneOff({ oneOff: null, startRecurring: true })}
                 onChanged={refresh}
-                onAmountEntered={(saved) => applyOneOff(saved.id, saved)}
               />
 
               <CardActivity
