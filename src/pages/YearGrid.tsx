@@ -17,6 +17,7 @@ import {
   categoryCard,
   categoryEntriesTotal,
   categoryHasEntries,
+  budgetFor,
   categoryOneOffs,
   currentMonthKey,
   formatMoney,
@@ -215,7 +216,7 @@ export function YearGrid() {
                       }
                       values={totals}
                       has={has}
-                      budget={cat.kind !== "income" ? cat.monthly_budget : null}
+                      budgets={months.map((m) => budgetFor(cat, m))}
                       color={colors.categorical[0]}
                       rowClass="bg-[var(--color-muted)] font-medium"
                       nameBg="bg-[var(--color-muted)]"
@@ -377,7 +378,7 @@ function SummaryRow({
   label,
   values,
   has,
-  budget,
+  budgets,
   color,
   rowClass,
   nameBg,
@@ -387,7 +388,8 @@ function SummaryRow({
   label: React.ReactNode;
   values: number[];
   has: boolean[];
-  budget?: number | null;
+  /** Each month's budget (budgets can change during the year) */
+  budgets?: (number | null)[];
   color: string;
   rowClass?: string;
   nameBg: string;
@@ -396,10 +398,14 @@ function SummaryRow({
 }) {
   const filled = values.filter((_, i) => has[i]);
   const year = sumMoney(values);
+  // The Budget column shows the latest month's; note when it changed during the year
+  const lastBudget = budgets?.[budgets.length - 1] ?? null;
+  const budgetChanged = !!budgets && budgets.some((b) => b !== budgets[0]);
   return (
     <tr className={rowClass}>
       <td className={cn(stickyName, nameBg)}>{label}</td>
       {values.map((v, i) => {
+        const budget = budgets?.[i] ?? null;
         const over = budget != null && has[i] && v > budget;
         const content = has[i] ? (
           <span className="inline-flex items-center gap-0.5">
@@ -434,8 +440,19 @@ function SummaryRow({
       <td className={cn(cellClass, "py-1.5 font-normal text-[var(--color-muted-foreground)]")}>
         {filled.length ? formatMoney(sumMoney(filled) / filled.length) : "·"}
       </td>
-      <td className={cn(cellClass, "py-1.5 font-normal text-[var(--color-muted-foreground)]")}>
-        {budget != null ? formatMoney(budget) : ""}
+      <td
+        className={cn(cellClass, "py-1.5 font-normal text-[var(--color-muted-foreground)]")}
+        title={
+          budgetChanged
+            ? `Changed this year: ${budgets!
+                .map((b, i) => (i === 0 || b !== budgets![i - 1] ? `${MONTH_SHORT[i]} ${b == null ? "none" : formatMoney(b)}` : null))
+                .filter(Boolean)
+                .join(", ")}`
+            : undefined
+        }
+      >
+        {lastBudget != null ? formatMoney(lastBudget) : budgetChanged ? "none" : ""}
+        {budgetChanged && "*"}
       </td>
       <td className="px-3 py-1.5">
         <Sparkline values={values.map((v, i) => (has[i] ? v : undefined))} color={color} />
@@ -467,16 +484,14 @@ function ItemRow({
       </td>
       {months.map((m) => (
         <td key={m} className="px-0.5 py-0.5 text-right">
-          <ItemCell item={item} month={m} ledger={ledger} budget={item.monthly_budget} onOpen={() => onOpenCell(m)} />
+          <ItemCell item={item} month={m} ledger={ledger} onOpen={() => onOpenCell(m)} />
         </td>
       ))}
       <td className={cn(cellClass, "font-medium")}>{formatMoney(sumMoney(filled))}</td>
       <td className={cn(cellClass, "text-[var(--color-muted-foreground)]")}>
         {filled.length ? formatMoney(sumMoney(filled) / filled.length) : "·"}
       </td>
-      <td className={cn(cellClass, "text-[var(--color-muted-foreground)]")}>
-        {item.monthly_budget != null ? formatMoney(item.monthly_budget) : ""}
-      </td>
+      <td />
       <td className="px-3 py-1.5">
         <Sparkline values={totals} color={color} />
       </td>
@@ -488,19 +503,16 @@ function ItemCell({
   item,
   month,
   ledger,
-  budget,
   onOpen,
 }: {
   item: LineItem;
   month: string;
   ledger: Ledger;
-  budget: number | null;
   onOpen: () => void;
 }) {
   const linked = itemOneOffs(ledger, item.id, month);
   const card = itemCard(ledger, item.id, month);
   const total = itemMonthTotal(ledger, item.id, month);
-  const over = budget != null && total !== undefined && total > budget;
 
   return (
     <button
@@ -508,8 +520,7 @@ function ItemCell({
       onClick={onOpen}
       className={cn(
         "inline-flex h-8 min-w-12 items-center justify-end rounded-md px-1.5 tabular-nums hover:bg-[var(--color-muted)]",
-        total === undefined && "text-[var(--color-muted-foreground)]",
-        over && "text-[var(--color-destructive)]"
+        total === undefined && "text-[var(--color-muted-foreground)]"
       )}
       aria-label={`${item.name} ${formatMonth(month, "short")}: ${total === undefined ? "nothing yet" : formatMoney(total)}`}
       title={[

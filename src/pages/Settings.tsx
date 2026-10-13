@@ -1,16 +1,23 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowDown, ArrowDownAZ, ArrowUp, CreditCard, Layers, FileSpreadsheet, Pencil, Plus } from "lucide-react";
+import { ArrowDown, ArrowDownAZ, ArrowUp, CreditCard, Layers, Target, FileSpreadsheet, Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
 import { EmptyBudget } from "@/components/EmptyBudget";
+import { BudgetDialog } from "@/components/BudgetDialog";
 import { CategoryDialog, ItemDialog } from "@/components/StructureDialogs";
 import {
+  budgetChangeFor,
+  budgetFor,
+  budgetStartLabel,
+  currentMonthKey,
   fetchStructure,
   formatMoney,
+  formatMonth,
   KIND_LABEL,
   saveOrder,
+  sumMoney,
   type Category,
   type CategoryKind,
   type LineItem,
@@ -31,6 +38,7 @@ export function Settings() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [budgetCategoryId, setBudgetCategoryId] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -90,6 +98,11 @@ export function Settings() {
   if (!loading && !error && categories.length === 0) return <EmptyBudget onSeeded={load} />;
 
   const visibleCategories = categories.filter((c) => showArchived || !c.archived);
+  const thisMonth = currentMonthKey();
+  // Every spending and savings category, so a budget can be set on any of them
+  const budgeted = categories.filter((c) => !c.archived && c.kind !== "income");
+  const totalBudgeted = sumMoney(budgeted.map((c) => budgetFor(c, thisMonth) ?? 0));
+  const budgetCategory = categories.find((c) => c.id === budgetCategoryId);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -116,6 +129,53 @@ export function Settings() {
           </Button>
         </div>
       </div>
+
+      {!loading && budgeted.length > 0 && (
+        <Card>
+          <div className="space-y-1 border-b border-[var(--color-border)] px-4 py-3">
+            <h2 className="flex items-center gap-2 font-semibold">
+              <Target className="h-4 w-4" aria-hidden /> Monthly budgets
+            </h2>
+            <p className="text-xs text-[var(--color-muted-foreground)]">
+              One budget per category. A change applies from the month you pick; earlier months keep the budget they had.
+            </p>
+          </div>
+          <ul className="divide-y divide-[var(--color-border)]">
+            {budgeted.map((cat) => {
+              const change = budgetChangeFor(cat, thisMonth);
+              const amount = budgetFor(cat, thisMonth);
+              const upcoming = cat.budgets.find((b) => b.start_month > thisMonth);
+              return (
+                <li key={cat.id}>
+                  <button
+                    type="button"
+                    onClick={() => setBudgetCategoryId(cat.id)}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--color-muted)]"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{cat.name}</span>
+                      <span className="block text-xs text-[var(--color-muted-foreground)]">
+                        {KIND_LABEL[cat.kind]}
+                        {change && amount != null && ` · ${budgetStartLabel(change.start_month)}`}
+                        {upcoming &&
+                          ` · ${upcoming.amount == null ? "none" : formatMoney(upcoming.amount)} ${budgetStartLabel(upcoming.start_month)}`}
+                      </span>
+                    </span>
+                    <span className={cn("tabular-nums", amount == null ? "text-sm text-[var(--color-muted-foreground)]" : "font-medium")}>
+                      {amount == null ? "Set budget" : `${formatMoney(amount)}/mo`}
+                    </span>
+                    <Pencil className="h-4 w-4 shrink-0 text-[var(--color-muted-foreground)]" aria-hidden />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="flex justify-between border-t border-[var(--color-border)] px-4 py-3 text-sm">
+            <span className="text-[var(--color-muted-foreground)]">Total budgeted for {formatMonth(thisMonth)}</span>
+            <span className="font-semibold tabular-nums">{formatMoney(totalBudgeted)}/mo</span>
+          </div>
+        </Card>
+      )}
 
       <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
         <label className="mr-auto flex items-center gap-2 text-sm">
@@ -154,7 +214,7 @@ export function Settings() {
                 </h2>
                 <p className="text-xs text-[var(--color-muted-foreground)]">
                   {KIND_LABEL[cat.kind]}
-                  {cat.monthly_budget != null && ` · Budget ${formatMoney(cat.monthly_budget)}/mo`}
+                  {budgetFor(cat, thisMonth) != null && ` · Budget ${formatMoney(budgetFor(cat, thisMonth)!)}/mo`}
                 </p>
               </div>
               <Button
@@ -192,11 +252,6 @@ export function Settings() {
                       {item.name}
                       {item.archived && <span className="ml-2 text-xs">(archived)</span>}
                     </div>
-                    {item.monthly_budget != null && (
-                      <div className="text-xs text-[var(--color-muted-foreground)]">
-                        Budget {formatMoney(item.monthly_budget)}/mo
-                      </div>
-                    )}
                   </div>
                   <Button
                     variant="ghost"
@@ -245,6 +300,17 @@ export function Settings() {
         );
       })}
 
+      {budgetCategory && (
+        <BudgetDialog
+          category={budgetCategory}
+          month={thisMonth}
+          onClose={() => setBudgetCategoryId(null)}
+          onChanged={() => {
+            setBudgetCategoryId(null);
+            load();
+          }}
+        />
+      )}
       {editing?.type === "category" && (
         <CategoryDialog
           category={editing.category}

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { supabase } from "@/lib/supabase";
-import { parseAmount, type Category, type CategoryKind, type LineItem } from "@/lib/budget";
+import { BUDGET_FROM_START, parseAmount, saveBudgetChange, type Category, type CategoryKind, type LineItem } from "@/lib/budget";
 
 // Create / edit dialogs for the budget's structure, shared by Settings and the month page
 
@@ -24,7 +24,8 @@ export function CategoryDialog({
   const [name, setName] = useState(category?.name ?? "");
   const [kind, setKind] = useState<CategoryKind>(category?.kind ?? "expense");
   const [archived, setArchived] = useState(category?.archived ?? false);
-  const [budgetText, setBudgetText] = useState(category?.monthly_budget != null ? String(category.monthly_budget) : "");
+  // Only when creating; an existing category's budget changes by month in BudgetDialog
+  const [budgetText, setBudgetText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -35,12 +36,23 @@ export function CategoryDialog({
     if (Number.isNaN(budget)) return setError("Budget must be a number like 600 or 75.50");
     setBusy(true);
     setError(null);
-    const row = { name: name.trim(), kind, archived, monthly_budget: kind === "income" ? null : budget };
-    const { error: err } = category
-      ? await supabase.from("categories").update(row).eq("id", category.id)
-      : await supabase.from("categories").insert({ ...row, sort_order: nextSortOrder });
+    const row = { name: name.trim(), kind, archived };
+    const { data, error: err } = category
+      ? await supabase.from("categories").update(row).eq("id", category.id).select("id").single()
+      : await supabase.from("categories").insert({ ...row, sort_order: nextSortOrder }).select("id").single();
+    if (err) {
+      setBusy(false);
+      return setError(err.code === "23505" ? "A category with that name already exists" : err.message);
+    }
+    if (!category && budget != null && kind !== "income") {
+      try {
+        await saveBudgetChange(data.id, BUDGET_FROM_START, budget);
+      } catch (budgetErr) {
+        setBusy(false);
+        return setError(`Category created, but its budget wasn't saved: ${budgetErr instanceof Error ? budgetErr.message : "unknown error"}`);
+      }
+    }
     setBusy(false);
-    if (err) return setError(err.code === "23505" ? "A category with that name already exists" : err.message);
     onSaved();
   }
 
@@ -87,9 +99,7 @@ export function CategoryDialog({
               <option value="savings">Savings</option>
             </Select>
           </div>
-          {kind !== "income" && (
-            <BudgetField id="cat-budget" value={budgetText} onChange={setBudgetText} />
-          )}
+          {!category && kind !== "income" && <BudgetField id="cat-budget" value={budgetText} onChange={setBudgetText} />}
           {category && (
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" className="h-4 w-4" checked={archived} onChange={(e) => setArchived(e.target.checked)} />
@@ -134,23 +144,15 @@ export function ItemDialog({
   const [name, setName] = useState(item?.name ?? "");
   const [catId, setCatId] = useState(item?.category_id ?? categoryId);
   const [archived, setArchived] = useState(item?.archived ?? false);
-  const [budgetText, setBudgetText] = useState(item?.monthly_budget != null ? String(item.monthly_budget) : "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return setError("Name is required");
-    const budget = parseAmount(budgetText);
-    if (Number.isNaN(budget)) return setError("Budget must be a number like 600 or 75.50");
     setBusy(true);
     setError(null);
-    const row = {
-      name: name.trim(),
-      category_id: catId,
-      monthly_budget: budget,
-      archived,
-    };
+    const row = { name: name.trim(), category_id: catId, archived };
     const { error: err } = item
       ? await supabase.from("line_items").update(row).eq("id", item.id)
       : await supabase.from("line_items").insert({ ...row, sort_order: nextSortOrder });
@@ -193,7 +195,6 @@ export function ItemDialog({
               ))}
             </Select>
           </div>
-          <BudgetField id="item-budget" value={budgetText} onChange={setBudgetText} />
           {item && (
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" className="h-4 w-4" checked={archived} onChange={(e) => setArchived(e.target.checked)} />

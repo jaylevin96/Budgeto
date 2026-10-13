@@ -14,11 +14,13 @@ import {
   ListPlus,
   Plus,
   Settings2,
+  Target,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FormError } from "@/components/ui/form-message";
 import { BudgetBar } from "@/components/BudgetBar";
+import { BudgetDialog } from "@/components/BudgetDialog";
 import { CardActivity } from "@/components/CardActivity";
 import { CardTransactionsDialog } from "@/components/CardTransactions";
 import { EmptyBudget } from "@/components/EmptyBudget";
@@ -31,6 +33,7 @@ import { SummaryTiles } from "@/components/SummaryTiles";
 import { useBudget } from "@/hooks/useBudget";
 import {
   addMonths,
+  budgetFor,
   categoryCard,
   categoryOneOffs,
   currentMonthKey,
@@ -93,6 +96,8 @@ export function MonthEntry() {
   } = useBudget(addMonths(month, -3), addMonths(month, 1));
   const [editingOneOff, setEditingOneOff] = useState<EditingOneOff>(null);
   const [creating, setCreating] = useState<Creating>(null);
+  const [budgetCategoryId, setBudgetCategoryId] = useState<string | null>(null);
+  const budgetCategory = categories.find((c) => c.id === budgetCategoryId);
   const [reordering, setReordering] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
   // A recurring entry whose amount changes each month opens in its own modal (this month's amount)
@@ -312,6 +317,7 @@ export function MonthEntry() {
                     onToggle={() => toggleCategory(cat.id)}
                     onAdd={() => setEditingOneOff({ oneOff: null, category_id: cat.id })}
                     onAddItem={() => setCreating({ type: "item", categoryId: cat.id })}
+                    onEditBudget={() => setBudgetCategoryId(cat.id)}
                     onEdit={editEntry}
                     onShowCard={showCard}
                   />
@@ -333,6 +339,18 @@ export function MonthEntry() {
           oneOffs={oneOffs}
           onSaved={applyTransactions}
           onCreated={applyCreated}
+        />
+      )}
+
+      {budgetCategory && (
+        <BudgetDialog
+          category={budgetCategory}
+          month={month}
+          onClose={() => setBudgetCategoryId(null)}
+          onChanged={() => {
+            setBudgetCategoryId(null);
+            refresh();
+          }}
         />
       )}
 
@@ -413,6 +431,7 @@ function CategoryCard({
   onToggle,
   onAdd,
   onAddItem,
+  onEditBudget,
   onEdit,
   onShowCard,
 }: {
@@ -424,6 +443,7 @@ function CategoryCard({
   onToggle: () => void;
   onAdd: () => void;
   onAddItem: () => void;
+  onEditBudget: () => void;
   onEdit: (o: OneOff) => void;
   onShowCard: (title: string, description: string, card: Transaction[]) => void;
 }) {
@@ -431,6 +451,7 @@ function CategoryCard({
   const otherCard = categoryCard(ledger, category.id, month);
   const hasOther = otherEntries.length + otherCard.length > 0;
   const subtotal = totalForCategoryMonth(ledger, category.id, month);
+  const budget = budgetFor(category, month);
   const otherTotal = sumMoney([...otherEntries, ...otherCard].map((x) => x.amount));
   const bodyId = `category-${category.id}`;
 
@@ -456,9 +477,7 @@ function CategoryCard({
             <span className="text-sm font-medium tabular-nums">{formatMoney(subtotal, true)}</span>
           </button>
         </h2>
-        {category.monthly_budget != null && category.kind !== "income" && (
-          <BudgetBar spent={subtotal} budget={category.monthly_budget} />
-        )}
+        {budget != null && <BudgetBar spent={subtotal} budget={budget} />}
       </div>
       {!collapsed && (
         <div id={bodyId}>
@@ -468,7 +487,6 @@ function CategoryCard({
                 key={item.id}
                 label={item.name}
                 total={itemMonthTotal(ledger, item.id, month)}
-                budget={item.monthly_budget}
                 entries={itemOneOffs(ledger, item.id, month)}
                 card={itemCard(ledger, item.id, month)}
                 onEdit={onEdit}
@@ -507,6 +525,11 @@ function CategoryCard({
             <Button variant="ghost" size="sm" className="text-[var(--color-muted-foreground)]" onClick={onAddItem}>
               <ListPlus /> Add line item
             </Button>
+            {category.kind !== "income" && (
+              <Button variant="ghost" size="sm" className="text-[var(--color-muted-foreground)]" onClick={onEditBudget}>
+                <Target /> {budget != null ? "Budget" : "Set budget"}
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -519,7 +542,6 @@ function ItemSection({
   label,
   muted = false,
   total,
-  budget,
   entries,
   card,
   onEdit,
@@ -528,7 +550,6 @@ function ItemSection({
   label: string;
   muted?: boolean;
   total: number | undefined;
-  budget?: number | null;
   entries: OneOff[];
   card: Transaction[];
   onEdit: (o: OneOff) => void;
@@ -544,7 +565,6 @@ function ItemSection({
           {total === undefined ? "—" : formatMoney(total, true)}
         </span>
       </div>
-      {budget != null && <BudgetBar spent={total ?? 0} budget={budget} className="px-4 pb-2" />}
       {(entries.length > 0 || card.length > 0) && (
         <div className="pb-1.5 pl-4 [&_button]:pl-3">
           {card.length > 0 && <CardChargesRow charges={card} onClick={() => onShowCard(card)} />}

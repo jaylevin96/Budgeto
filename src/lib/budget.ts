@@ -10,8 +10,21 @@ export type Category = {
   kind: CategoryKind;
   sort_order: number;
   archived: boolean;
-  monthly_budget: number | null;
+  /** Budget changes, oldest first; see budgetFor */
+  budgets: CategoryBudget[];
 };
+
+/** "From start_month on, this category's monthly budget is amount" (null = no budget) */
+export type CategoryBudget = {
+  id: string;
+  category_id: string;
+  amount: number | null;
+  /** First of month, YYYY-MM-01 */
+  start_month: string;
+};
+
+/** Start month of a budget that carried over from before budgets had dates */
+export const BUDGET_FROM_START = "2000-01-01";
 
 export type LineItem = {
   id: string;
@@ -21,7 +34,6 @@ export type LineItem = {
   default_amount: number | null;
   sort_order: number;
   archived: boolean;
-  monthly_budget: number | null;
 };
 
 /**
@@ -124,29 +136,61 @@ export function sumMoney(values: number[]): number {
 
 const num = (v: unknown) => (v == null ? null : Number(v));
 
+const CATEGORY_COLUMNS = "id, name, kind, sort_order, archived";
+const ITEM_COLUMNS = "id, category_id, name, recurrence, default_amount, sort_order, archived";
+const BUDGET_COLUMNS = "id, category_id, amount, start_month";
+
+const toBudget = (b: CategoryBudget): CategoryBudget => ({ ...b, amount: num(b.amount) });
+
 export async function fetchStructure(): Promise<{ categories: Category[]; items: LineItem[] }> {
-  const [cats, items] = await Promise.all([
-    supabase
-      .from("categories")
-      .select("id, name, kind, sort_order, archived, monthly_budget")
-      .order("sort_order")
-      .order("name"),
-    supabase
-      .from("line_items")
-      .select("id, category_id, name, recurrence, default_amount, sort_order, archived, monthly_budget")
-      .order("sort_order")
-      .order("name"),
+  const [cats, items, budgets] = await Promise.all([
+    supabase.from("categories").select(CATEGORY_COLUMNS).order("sort_order").order("name"),
+    supabase.from("line_items").select(ITEM_COLUMNS).order("sort_order").order("name"),
+    supabase.from("category_budgets").select(BUDGET_COLUMNS).order("start_month"),
   ]);
   if (cats.error) throw cats.error;
   if (items.error) throw items.error;
+  if (budgets.error) throw budgets.error;
+  const byCategory = new Map<string, CategoryBudget[]>();
+  for (const b of budgets.data as CategoryBudget[]) byCategory.set(b.category_id, [...(byCategory.get(b.category_id) ?? []), toBudget(b)]);
   return {
-    categories: (cats.data as Category[]).map((c) => ({ ...c, monthly_budget: num(c.monthly_budget) })),
-    items: (items.data as LineItem[]).map((i) => ({
-      ...i,
-      default_amount: num(i.default_amount),
-      monthly_budget: num(i.monthly_budget),
-    })),
+    categories: (cats.data as Omit<Category, "budgets">[]).map((c) => ({ ...c, budgets: byCategory.get(c.id) ?? [] })),
+    items: (items.data as LineItem[]).map((i) => ({ ...i, default_amount: num(i.default_amount) })),
   };
+}
+
+/** The category's budget change in effect for `month` (the latest starting on or before it) */
+export function budgetChangeFor(category: Category, month: string): CategoryBudget | undefined {
+  let found: CategoryBudget | undefined;
+  for (const b of category.budgets) if (b.start_month <= month) found = b;
+  return found;
+}
+
+/** The category's monthly budget for `month`, or null when it has none (income never has one) */
+export function budgetFor(category: Category, month: string): number | null {
+  if (category.kind === "income") return null;
+  return budgetChangeFor(category, month)?.amount ?? null;
+}
+
+/** "from Oct 2026", or "from the start" for a budget that carried over */
+export function budgetStartLabel(startMonth: string): string {
+  return startMonth === BUDGET_FROM_START ? "from the start" : `from ${formatMonth(startMonth, "short")}`;
+}
+
+/** Set a category's budget from `startMonth` on (replacing a change that starts that same month). */
+export async function saveBudgetChange(categoryId: string, startMonth: string, amount: number | null): Promise<CategoryBudget> {
+  const { data, error } = await supabase
+    .from("category_budgets")
+    .upsert({ category_id: categoryId, start_month: startMonth, amount }, { onConflict: "category_id,start_month" })
+    .select(BUDGET_COLUMNS)
+    .single();
+  if (error) throw error;
+  return toBudget(data as CategoryBudget);
+}
+
+export async function deleteBudgetChange(id: string): Promise<void> {
+  const { error } = await supabase.from("category_budgets").delete().eq("id", id);
+  if (error) throw error;
 }
 
 /**
@@ -185,10 +229,10 @@ export async function createLineItem(
     const { data, error } = await supabase
       .from("categories")
       .insert({ name: target.newCategoryName.trim(), kind: "expense", sort_order: nextOrder(existing.categories) })
-      .select("id, name, kind, sort_order, archived, monthly_budget")
+      .select(CATEGORY_COLUMNS)
       .single();
     if (error) throw error.code === "23505" ? new Error("A category with that name already exists") : error;
-    category = { ...(data as Category), monthly_budget: num(data.monthly_budget) };
+    category = { ...(data as Omit<Category, "budgets">), budgets: [] };
     categoryId = category.id;
   }
   const { data, error } = await supabase
@@ -198,7 +242,7 @@ export async function createLineItem(
       category_id: categoryId,
       sort_order: nextOrder(existing.items.filter((i) => i.category_id === categoryId)),
     })
-    .select("id, category_id, name, recurrence, default_amount, sort_order, archived, monthly_budget")
+    .select(ITEM_COLUMNS)
     .single();
   if (error) {
     // Don't leave an empty new category behind
@@ -206,7 +250,7 @@ export async function createLineItem(
     throw error.code === "23505" ? new Error("That category already has a line item with this name") : error;
   }
   const item = data as LineItem;
-  return { category, item: { ...item, default_amount: num(item.default_amount), monthly_budget: num(item.monthly_budget) } };
+  return { category, item: { ...item, default_amount: num(item.default_amount) } };
 }
 
 const ONE_OFF_COLUMNS = "id, name, amount, month, category_id, line_item_id, note, recurring_id";

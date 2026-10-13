@@ -27,6 +27,7 @@ import { useBudget } from "@/hooks/useBudget";
 import { useChartColors, type ChartColors } from "@/lib/chartColors";
 import {
   addMonths,
+  budgetFor,
   currentMonthKey,
   formatMoney,
   formatMoneyCompact,
@@ -146,8 +147,9 @@ export function Dashboard() {
 
   // Budget vs actual for the month, for categories that have a monthly budget
   const budgetRows = categories
-    .filter((c) => c.monthly_budget != null && c.kind !== "income" && !c.archived)
-    .map((c) => ({ cat: c, budget: c.monthly_budget!, spent: totalForCategoryMonth(ledger, c.id, selectedMonth) }));
+    .filter((c) => !c.archived)
+    .map((c) => ({ cat: c, budget: budgetFor(c, selectedMonth), spent: totalForCategoryMonth(ledger, c.id, selectedMonth) }))
+    .filter((r): r is typeof r & { budget: number } => r.budget != null);
   const budgetRemaining = sumMoney([...budgetRows.map((r) => r.budget), ...budgetRows.map((r) => -r.spent)]);
 
   // Biggest purchases this month: counted card charges and one-time manual entries, spending only
