@@ -133,7 +133,7 @@ export function CardActivity({
     onOpenCharges(title, "Move any charge that belongs somewhere else; changes save right away.", list);
 
   return (
-    <Card>
+    <Card className="@container">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--color-border)] px-4 py-3">
         <h2 className="flex flex-1 items-center gap-2 font-semibold">
           <CreditCard className="h-4 w-4" aria-hidden /> Amex activity
@@ -143,7 +143,8 @@ export function CardActivity({
         </Button>
       </div>
 
-      <div className="grid gap-4 p-4 sm:grid-cols-[minmax(0,14rem)_1fr]">
+      {/* Sized to the card, not the screen: it sits in a narrow side column on wide month pages */}
+      <div className="grid gap-4 p-4 @xl:grid-cols-[minmax(0,14rem)_1fr]">
         {/* Headline: what the card added to this month's budget */}
         <div className="space-y-3">
           <div>
