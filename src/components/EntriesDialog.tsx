@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 export type EntriesPeriod = { month: string; entries: LedgerEntry[] };
 
-const SOURCE = {
+export const ENTRY_SOURCE = {
   card: { icon: CreditCard, label: "Card" },
   manual: { icon: PenLine, label: "Manual entry" },
   recurring: { icon: Repeat, label: "Recurring" },
@@ -69,7 +69,7 @@ function PeriodList({ period, showHeading, showItem }: { period: EntriesPeriod; 
       ) : (
         <ul className="divide-y divide-[var(--color-border)]">
           {period.entries.map((e) => {
-            const { icon: Icon, label } = SOURCE[e.source];
+            const { icon: Icon, label } = ENTRY_SOURCE[e.source];
             const detail = [e.postedOn ? formatDay(e.postedOn) : label, showItem && e.itemName].filter(Boolean).join(" · ");
             return (
               <li key={e.id} className="flex items-center gap-3 py-2 text-sm">

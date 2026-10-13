@@ -12,6 +12,7 @@ import { Settings } from "@/pages/Settings";
 const Dashboard = lazy(() => import("@/pages/Dashboard").then((m) => ({ default: m.Dashboard })));
 const Import = lazy(() => import("@/pages/Import").then((m) => ({ default: m.Import })));
 const Search = lazy(() => import("@/pages/Search").then((m) => ({ default: m.Search })));
+const Trend = lazy(() => import("@/pages/Trend").then((m) => ({ default: m.Trend })));
 const CardImport = lazy(() => import("@/pages/CardImport").then((m) => ({ default: m.CardImport })));
 
 function FullPageLoading() {
@@ -62,6 +63,8 @@ export function AppRoutes() {
         <Route path="/year" element={<YearGrid />} />
         <Route path="/year/:year" element={<YearGrid />} />
         <Route path="/search" element={<Search />} />
+        <Route path="/items/:id" element={<Trend kind="item" key="item" />} />
+        <Route path="/categories/:id" element={<Trend kind="category" key="category" />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/settings/import" element={<Import />} />
         <Route path="/import/card" element={<CardImport />} />

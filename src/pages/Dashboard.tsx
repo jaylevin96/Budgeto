@@ -23,6 +23,7 @@ import { EmptyBudget } from "@/components/EmptyBudget";
 import { EntriesDialog, type EntriesPeriod } from "@/components/EntriesDialog";
 import { StepperNav } from "@/components/StepperNav";
 import { SummaryTiles } from "@/components/SummaryTiles";
+import { TrendLink } from "@/components/TrendLink";
 import { useBudget } from "@/hooks/useBudget";
 import { useChartColors, type ChartColors } from "@/lib/chartColors";
 import {
@@ -466,13 +467,16 @@ export function Dashboard() {
                     ) : (
                       budgetRows.map((r) => (
                         <div key={r.cat.id}>
-                          <button
-                            type="button"
-                            className="mb-1 block text-left text-sm font-medium hover:underline"
-                            onClick={() => showGroupEntries(r.cat.name, { kind: "category", id: r.cat.id })}
-                          >
-                            {r.cat.name}
-                          </button>
+                          <div className="mb-1 flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="text-left text-sm font-medium hover:underline"
+                              onClick={() => showGroupEntries(r.cat.name, { kind: "category", id: r.cat.id })}
+                            >
+                              {r.cat.name}
+                            </button>
+                            <TrendLink kind="category" id={r.cat.id} name={r.cat.name} />
+                          </div>
                           <BudgetBar spent={r.spent} budget={r.budget} />
                         </div>
                       ))

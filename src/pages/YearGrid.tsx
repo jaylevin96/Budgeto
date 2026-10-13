@@ -10,6 +10,7 @@ import { CardTransactionList } from "@/components/CardTransactions";
 import { OneOffDialog } from "@/components/OneOffDialog";
 import { OneOffList } from "@/components/OneOffList";
 import { StepperNav } from "@/components/StepperNav";
+import { TrendLink } from "@/components/TrendLink";
 import { useBudget } from "@/hooks/useBudget";
 import { useChartColors } from "@/lib/chartColors";
 import {
@@ -202,17 +203,20 @@ export function YearGrid() {
                   <Fragment key={cat.id}>
                     <SummaryRow
                       label={
-                        <button
-                          type="button"
-                          onClick={() => toggle(cat.id)}
-                          aria-expanded={isOpen}
-                          className="flex w-full items-center gap-1 text-left"
-                        >
-                          {isOpen ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
-                          <span className="truncate font-semibold" title={`${cat.name} (${KIND_LABEL[cat.kind]})`}>
-                            {cat.name}
-                          </span>
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => toggle(cat.id)}
+                            aria-expanded={isOpen}
+                            className="flex min-w-0 flex-1 items-center gap-1 text-left"
+                          >
+                            {isOpen ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+                            <span className="truncate font-semibold" title={`${cat.name} (${KIND_LABEL[cat.kind]})`}>
+                              {cat.name}
+                            </span>
+                          </button>
+                          <TrendLink kind="category" id={cat.id} name={cat.name} />
+                        </div>
                       }
                       values={totals}
                       has={has}
@@ -481,7 +485,9 @@ function ItemRow({
   return (
     <tr className="border-b border-[var(--color-border)] hover:bg-[var(--color-accent)]">
       <td className={cn(stickyName, "bg-[var(--color-card)] pl-8", item.archived && "text-[var(--color-muted-foreground)]")}>
-        {item.name}
+        <Link to={`/items/${item.id}`} className="hover:underline" title={`${item.name} over time`}>
+          {item.name}
+        </Link>
       </td>
       {months.map((m) => (
         <td key={m} className="px-0.5 py-0.5 text-right">

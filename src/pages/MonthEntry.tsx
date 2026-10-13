@@ -34,6 +34,7 @@ import { SearchResults } from "@/components/SearchResults";
 import { CategoryDialog, ItemDialog } from "@/components/StructureDialogs";
 import { StepperNav } from "@/components/StepperNav";
 import { SummaryTiles } from "@/components/SummaryTiles";
+import { TrendLink } from "@/components/TrendLink";
 import { useBudget } from "@/hooks/useBudget";
 import {
   addMonths,
@@ -527,13 +528,13 @@ function CategoryCard({
   return (
     <Card>
       <div className={cn("space-y-2 px-4 py-3", !collapsed && "border-b border-[var(--color-border)]")}>
-        <h2>
+        <h2 className="flex items-center gap-1">
           <button
             type="button"
             onClick={onToggle}
             aria-expanded={!collapsed}
             aria-controls={bodyId}
-            className="-mx-1 flex w-[calc(100%+0.5rem)] items-baseline gap-2 rounded-md px-1 text-left focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]"
+            className="-ml-1 flex min-w-0 flex-1 items-baseline gap-2 rounded-md px-1 text-left focus-visible:outline-2 focus-visible:outline-[var(--color-ring)]"
           >
             <ChevronDown
               className={cn("h-4 w-4 shrink-0 self-center text-[var(--color-muted-foreground)] transition-transform", collapsed && "-rotate-90")}
@@ -545,6 +546,7 @@ function CategoryCard({
             </span>
             <span className="text-sm font-medium tabular-nums">{formatMoney(subtotal, true)}</span>
           </button>
+          <TrendLink kind="category" id={category.id} name={category.name} />
         </h2>
         {budget != null && <BudgetBar spent={subtotal} budget={budget} />}
       </div>
