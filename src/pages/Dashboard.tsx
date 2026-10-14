@@ -23,7 +23,6 @@ import { EmptyBudget } from "@/components/EmptyBudget";
 import { EntriesDialog, type EntriesPeriod } from "@/components/EntriesDialog";
 import { StepperNav } from "@/components/StepperNav";
 import { SummaryTiles } from "@/components/SummaryTiles";
-import { SubscriptionsCard } from "@/components/SubscriptionsCard";
 import { TrendLink } from "@/components/TrendLink";
 import { useBudget } from "@/hooks/useBudget";
 import { useChartColors, type ChartColors } from "@/lib/chartColors";
@@ -522,8 +521,6 @@ export function Dashboard() {
                   </CardContent>
                 </Card>
               </div>
-
-              <SubscriptionsCard transactions={ledger.transactions} month={selectedMonth} />
             </section>
           )}
         </>
